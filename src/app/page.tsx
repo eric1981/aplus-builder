@@ -8,11 +8,12 @@ const POLL_INTERVAL = 3000;
 
 // ===== 类型 =====
 
-type StylePref = "auto" | "editorial" | "swiss";
+type BuiltinStyle = "auto" | "editorial" | "swiss" | "product-launch" | "xhs-pastel" | "amazon-premium";
 type ModelPref = "auto" | "east-asian" | "european" | "middle-eastern";
 
 interface Preferences {
-  style: StylePref;
+  style: BuiltinStyle;
+  odStyle: string;  // Open Design template name, "" = none
   model: ModelPref;
 }
 
@@ -24,14 +25,57 @@ interface SavedState {
 
 type TaskImage = { name: string; base64: string; mime: string };
 
-const DEFAULT_PREFS: Preferences = { style: "auto", model: "auto" };
+const DEFAULT_PREFS: Preferences = { style: "auto", odStyle: "", model: "auto" };
 
-// ===== 偏好选项配置 =====
+// ===== 5 种内置风格（可视化卡片）=====
 
-const STYLE_OPTIONS: { value: StylePref; label: string; desc: string; className: string }[] = [
-  { value: "auto", label: "AI 决定", desc: "根据品类自动选", className: "bg-gradient-to-br from-gray-100 to-gray-200" },
-  { value: "editorial", label: "暖杂志风", desc: "衬线体 · 圆角 · 暖色调", className: "bg-[#FBFBFA] border-2 border-[#E8E8E5]" },
-  { value: "swiss", label: "瑞士风", desc: "无衬线 · 直角 · 黑白灰", className: "bg-white border-2 border-[#111]" },
+const STYLE_OPTIONS: { value: BuiltinStyle; label: string; desc: string; preview: React.ReactNode; className: string }[] = [
+  {
+    value: "auto", label: "AI 决定", desc: "根据品类自动选最合适的",
+    className: "bg-gradient-to-br from-gray-100 to-gray-200",
+    preview: <div className="flex gap-1"><div className="w-5 h-3 rounded-sm bg-white/60" /><div className="w-5 h-3 rounded-sm bg-gray-300/60" /></div>,
+  },
+  {
+    value: "editorial", label: "Editorial 暖杂志", desc: "衬线体 · 圆角卡 · 暖白底",
+    className: "bg-[#FBFBFA]",
+    preview: <div className="space-y-1"><div className="h-1 w-6 rounded-full bg-[#E8E8E5]" /><div className="h-0.5 w-4 rounded-full bg-[#E8E8E5]" /><div className="h-1 w-5 rounded-full bg-[#D4A0A0]" /></div>,
+  },
+  {
+    value: "swiss", label: "Swiss 瑞士风", desc: "无衬线 · 全直角 · 黑白灰",
+    className: "bg-white",
+    preview: <div className="space-y-1"><div className="h-1 w-7 bg-[#111]" /><div className="h-px w-5 bg-[#888]" /><div className="h-1 w-4 bg-[#111]" /></div>,
+  },
+  {
+    value: "product-launch", label: "Product Launch", desc: "暗底Hero · 暖橙渐变",
+    className: "bg-[#1A1A1A]",
+    preview: <div className="space-y-1"><div className="h-0.5 w-6 bg-[#F97316]/60" /><div className="h-1 w-4 bg-[#F97316]/40 rounded-sm" /><div className="h-0.5 w-5 bg-[#F97316]/30" /></div>,
+  },
+  {
+    value: "xhs-pastel", label: "小红书 Pastel", desc: "圆角 · 马卡龙 · 种草风",
+    className: "bg-gradient-to-br from-[#FFF0F5] to-[#F0E6FF]",
+    preview: <div className="flex gap-1"><div className="w-3 h-3 rounded-full bg-[#FFB6C1]/60" /><div className="w-3 h-3 rounded-full bg-[#DDA0DD]/50" /><div className="w-3 h-3 rounded-full bg-[#B0E0E6]/50" /></div>,
+  },
+  {
+    value: "amazon-premium", label: "Amazon Premium", desc: "全出血 · 文字蒙层 · 原生感",
+    className: "bg-white",
+    preview: <div className="w-full space-y-0.5"><div className="h-1.5 w-full bg-[#E8E8E5]" /><div className="flex gap-0.5"><div className="h-1 w-3 bg-[#111]/20" /><div className="h-1 w-2 bg-[#111]/10" /></div></div>,
+  },
+];
+
+// ===== Open Design 扩展风格（仅文字列表）=====
+
+const OD_STYLES = [
+  { value: "zhangzara-editorial-tri-tone", label: "Zhangzara Editorial" },
+  { value: "soft-editorial", label: "Soft Editorial" },
+  { value: "bold-poster", label: "Bold Poster" },
+  { value: "capsule", label: "Capsule" },
+  { value: "coral", label: "Coral" },
+  { value: "pink-script", label: "Pink Script" },
+  { value: "studio", label: "Studio" },
+  { value: "sakura-chroma", label: "Sakura Chroma" },
+  { value: "xhs-white-editorial", label: "XHS White Editorial" },
+  { value: "monochrome", label: "Monochrome" },
+  { value: "brutalist", label: "Brutalist" },
 ];
 
 const MODEL_OPTIONS: { value: ModelPref; label: string; skin: string }[] = [
@@ -304,50 +348,51 @@ export default function Home() {
                 className="text-sm text-text-muted hover:text-brand flex items-center gap-1.5">
                 <span className="text-base">{showPrefs ? "▾" : "▸"}</span>
                 偏好设置
-                {(prefs.style !== "auto" || prefs.model !== "auto") && (
-                  <span className="ml-2 px-1.5 py-0.5 bg-brand/10 text-brand text-[11px] rounded font-medium">
-                    {prefs.style !== "auto" && prefs.model !== "auto" ? "已自定义" : "已修改"}
-                  </span>
+                {(prefs.style !== "auto" || prefs.odStyle || prefs.model !== "auto") && (
+                  <span className="ml-2 px-1.5 py-0.5 bg-brand/10 text-brand text-[11px] rounded font-medium">已自定义</span>
                 )}
               </button>
 
               {showPrefs && (
                 <div className="mt-4 space-y-5 p-5 bg-gray-50 rounded-xl">
-                  {/* 风格 */}
+                  {/* 5 种内置风格 */}
                   <div>
                     <label className="block text-sm font-medium mb-3">排版风格</label>
                     <div className="grid grid-cols-3 gap-3">
                       {STYLE_OPTIONS.map((opt) => (
-                        <button key={opt.value} onClick={() => setPrefs({ ...prefs, style: opt.value })}
+                        <button key={opt.value}
+                          onClick={() => setPrefs({ ...prefs, style: opt.value, odStyle: "" })}
                           className={`relative p-3 rounded-xl text-left transition-all ${
-                            prefs.style === opt.value
+                            prefs.style === opt.value && !prefs.odStyle
                               ? "ring-2 ring-brand ring-offset-1"
                               : "hover:ring-1 hover:ring-gray-300"
                           } ${opt.className}`}>
-                          {/* 微缩预览 */}
-                          {opt.value === "auto" && (
-                            <div className="flex items-center gap-1 mb-2">
-                              <div className="w-6 h-4 rounded bg-gradient-to-r from-[#FBFBFA] to-white border border-[#E8E8E5]" />
-                              <div className="w-6 h-4 rounded bg-white border border-[#111]" />
-                            </div>
-                          )}
-                          {opt.value === "editorial" && (
-                            <div className="mb-2 flex flex-col gap-1">
-                              <div className="h-1.5 w-3/4 rounded-full bg-[#E8E8E5]" />
-                              <div className="h-1 w-1/2 rounded-full bg-[#E8E8E5]" />
-                            </div>
-                          )}
-                          {opt.value === "swiss" && (
-                            <div className="mb-2 flex flex-col gap-1">
-                              <div className="h-1.5 w-3/4 bg-[#111]" />
-                              <div className="h-px w-1/2 bg-[#888]" />
-                            </div>
-                          )}
+                          <div className="mb-2">{opt.preview}</div>
                           <p className="text-xs font-semibold">{opt.label}</p>
                           <p className="text-[10px] text-text-muted mt-0.5">{opt.desc}</p>
                         </button>
                       ))}
                     </div>
+
+                    {/* Open Design 扩展风格 */}
+                    <details className="mt-3">
+                      <summary className="text-xs text-text-muted cursor-pointer hover:text-brand py-1">
+                        + 更多 Open Design 风格（14 种）
+                      </summary>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {OD_STYLES.map((od) => (
+                          <button key={od.value}
+                            onClick={() => setPrefs({ ...prefs, odStyle: prefs.odStyle === od.value ? "" : od.value, style: prefs.odStyle === od.value ? prefs.style : "auto" })}
+                            className={`px-2.5 py-1 rounded-md text-[11px] transition-all ${
+                              prefs.odStyle === od.value
+                                ? "bg-brand text-white font-medium"
+                                : "bg-white border border-border text-text-muted hover:border-brand/30 hover:text-text"
+                            }`}>
+                            {od.label}
+                          </button>
+                        ))}
+                      </div>
+                    </details>
                   </div>
 
                   {/* 模特 */}
@@ -361,13 +406,10 @@ export default function Home() {
                               ? "ring-2 ring-brand ring-offset-1"
                               : "hover:ring-1 hover:ring-gray-300"
                           }`}>
-                          {/* 肤色卡片 */}
                           <div className={`aspect-[3/4] ${opt.skin} flex items-center justify-center`}>
-                            {opt.value === "auto" && (
+                            {opt.value === "auto" ? (
                               <div className="text-2xl">✨</div>
-                            )}
-                            {opt.value !== "auto" && (
-                              /* 简笔人物剪影 */
+                            ) : (
                               <svg viewBox="0 0 40 60" className="w-8 h-12 opacity-60">
                                 <ellipse cx="20" cy="14" rx="8" ry="9" fill="rgba(0,0,0,0.15)" />
                                 <path d="M8 56V42c0-4 4-8 12-8s12 4 12 8v14" fill="rgba(0,0,0,0.1)" />

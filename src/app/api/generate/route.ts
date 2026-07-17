@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const description = (formData.get("description") as string) || "";
 
     // 解析用户偏好
-    let prefs: { style?: string; model?: string } = {};
+    let prefs: { style?: string; odStyle?: string; model?: string } = {};
     try {
       const raw = formData.get("preferences") as string;
       if (raw) prefs = JSON.parse(raw);
@@ -57,8 +57,17 @@ export async function POST(request: NextRequest) {
 
     // 偏好提示
     const prefLines: string[] = [];
-    if (prefs.style && prefs.style !== "auto") {
-      prefLines.push(`- 排版风格：${prefs.style === "editorial" ? "Editorial 暖杂志风" : "Swiss 瑞士风"}（已由用户指定，不要使用其他风格）`);
+    if (prefs.odStyle) {
+      prefLines.push(`- 排版风格：使用 Open Design 模板 "${prefs.odStyle}"（已由用户指定，提取其视觉签名后手写 A+ HTML，不要使用内置风格）`);
+    } else if (prefs.style && prefs.style !== "auto") {
+      const styleLabel: Record<string, string> = {
+        "editorial": "Editorial 暖杂志风",
+        "swiss": "Swiss 瑞士风",
+        "product-launch": "Product Launch 暗底Hero风",
+        "xhs-pastel": "小红书 Pastel 马卡龙风",
+        "amazon-premium": "Amazon Premium A+ 原生风",
+      };
+      prefLines.push(`- 排版风格：${styleLabel[prefs.style] || prefs.style}（已由用户指定，不要使用其他风格）`);
     }
     if (prefs.model && prefs.model !== "auto") {
       const modelLabel: Record<string, string> = { "east-asian": "东亚", "european": "欧美", "middle-eastern": "中东/混血" };
