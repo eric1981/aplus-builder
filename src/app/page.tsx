@@ -47,7 +47,7 @@ const STYLE_OPTIONS: { value: BuiltinStyle; label: string; desc: string; preview
   },
   {
     value: "product-launch", label: "Product Launch", desc: "暗底Hero · 暖橙渐变",
-    className: "bg-[#1A1A1A]",
+    className: "bg-[#1A1A1A] text-white/90",
     preview: <div className="space-y-1"><div className="h-0.5 w-6 bg-[#F97316]/60" /><div className="h-1 w-4 bg-[#F97316]/40 rounded-sm" /><div className="h-0.5 w-5 bg-[#F97316]/30" /></div>,
   },
   {
@@ -78,11 +78,23 @@ const OD_STYLES = [
   { value: "brutalist", label: "Brutalist" },
 ];
 
-const MODEL_OPTIONS: { value: ModelPref; label: string; skin: string }[] = [
-  { value: "auto", label: "AI 决定", skin: "bg-gradient-to-br from-purple-100 via-blue-100 to-pink-100" },
-  { value: "east-asian", label: "东亚", skin: "bg-gradient-to-b from-[#F5E6D3] to-[#E8D5C0]" },
-  { value: "european", label: "欧美", skin: "bg-gradient-to-b from-[#FDE8D0] to-[#F0C8A0]" },
-  { value: "middle-eastern", label: "中东/混血", skin: "bg-gradient-to-b from-[#D4A574] to-[#C4956A]" },
+const MODEL_OPTIONS: { value: ModelPref; label: string; image?: string; photographer?: string }[] = [
+  { value: "auto", label: "AI 决定" },
+  {
+    value: "east-asian", label: "东亚",
+    image: "https://images.pexels.com/photos/36210958/pexels-photo-36210958.jpeg?auto=compress&cs=tinysrgb&h=400",
+    photographer: "Pexels",
+  },
+  {
+    value: "european", label: "欧美",
+    image: "https://images.pexels.com/photos/31780144/pexels-photo-31780144.jpeg?auto=compress&cs=tinysrgb&h=400",
+    photographer: "George Frewat",
+  },
+  {
+    value: "middle-eastern", label: "中东/混血",
+    image: "https://images.pexels.com/photos/5885973/pexels-photo-5885973.jpeg?auto=compress&cs=tinysrgb&h=400",
+    photographer: "shahin khalaji",
+  },
 ];
 
 // ===== 本地存储 =====
@@ -406,16 +418,14 @@ export default function Home() {
                               ? "ring-2 ring-brand ring-offset-1"
                               : "hover:ring-1 hover:ring-gray-300"
                           }`}>
-                          <div className={`aspect-[3/4] ${opt.skin} flex items-center justify-center`}>
+                          <div className="aspect-[3/4] bg-gray-100 flex items-center justify-center overflow-hidden">
                             {opt.value === "auto" ? (
                               <div className="text-2xl">✨</div>
-                            ) : (
-                              <svg viewBox="0 0 40 60" className="w-8 h-12 opacity-60">
-                                <ellipse cx="20" cy="14" rx="8" ry="9" fill="rgba(0,0,0,0.15)" />
-                                <path d="M8 56V42c0-4 4-8 12-8s12 4 12 8v14" fill="rgba(0,0,0,0.1)" />
-                                <rect x="14" y="22" width="4" height="14" rx="2" fill="rgba(0,0,0,0.08)" />
-                              </svg>
-                            )}
+                            ) : opt.image ? (
+                              <img src={opt.image} alt={opt.label} className="w-full h-full object-cover"
+                                loading="lazy"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                            ) : null}
                           </div>
                           <div className="p-2 bg-white">
                             <p className="text-[11px] font-semibold text-center">{opt.label}</p>
