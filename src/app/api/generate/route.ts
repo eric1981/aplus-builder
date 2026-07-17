@@ -44,15 +44,33 @@ export async function POST(request: NextRequest) {
 
     const description = (formData.get("description") as string) || "";
 
+    // 解析用户偏好
+    let prefs: { style?: string; model?: string } = {};
+    try {
+      const raw = formData.get("preferences") as string;
+      if (raw) prefs = JSON.parse(raw);
+    } catch {}
+
     const descBlock = description.trim()
       ? `\n产品信息：${description}\n`
       : "\n（用户未提供描述，请根据产品图自行分析品类、面料、风格并生成详情页）\n";
+
+    // 偏好提示
+    const prefLines: string[] = [];
+    if (prefs.style && prefs.style !== "auto") {
+      prefLines.push(`- 排版风格：${prefs.style === "editorial" ? "Editorial 暖杂志风" : "Swiss 瑞士风"}（已由用户指定，不要使用其他风格）`);
+    }
+    if (prefs.model && prefs.model !== "auto") {
+      const modelLabel: Record<string, string> = { "east-asian": "东亚", "european": "欧美", "middle-eastern": "中东/混血" };
+      prefLines.push(`- 模特偏好：${modelLabel[prefs.model] || prefs.model}（已由用户指定，所有场景图使用此类模特）`);
+    }
 
     const prompt = [
       `帮我生成这个产品的电商详情页。`,
       ``,
       `产品图：${imgPath}`,
       descBlock,
+      ...(prefLines.length > 0 ? [`用户偏好：`, ...prefLines, ``] : []),
       `【重要规则】`,
       `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
       `- 把最终产出物（index.html、图片、manifest）全部放到 ${outputDir}/ 下面，不要放到 Downloads。`,
