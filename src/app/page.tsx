@@ -87,13 +87,13 @@ const MODEL_OPTIONS: { value: ModelPref; label: string; image?: string; photogra
   },
   {
     value: "european", label: "欧美",
-    image: "https://images.pexels.com/photos/31780144/pexels-photo-31780144.jpeg?auto=compress&cs=tinysrgb&h=400",
-    photographer: "George Frewat",
+    image: "https://images.pexels.com/photos/4013692/pexels-photo-4013692.jpeg?auto=compress&cs=tinysrgb&h=400",
+    photographer: "Antonio Friedemann",
   },
   {
     value: "middle-eastern", label: "中东/混血",
-    image: "https://images.pexels.com/photos/5885973/pexels-photo-5885973.jpeg?auto=compress&cs=tinysrgb&h=400",
-    photographer: "shahin khalaji",
+    image: "https://images.pexels.com/photos/29386531/pexels-photo-29386531.jpeg?auto=compress&cs=tinysrgb&h=400",
+    photographer: "Mohammed Hassan",
   },
 ];
 
