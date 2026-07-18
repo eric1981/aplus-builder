@@ -6,16 +6,42 @@ import { randomUUID } from "crypto";
 
 type TaskImage = { name: string; base64: string; mime: string };
 type Task = {
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "queued";
   html?: string;
   images?: TaskImage[];
   preference_signal?: string;
   error?: string;
   log?: string;
+  queuePosition?: number;
 };
 
 const tasks = new Map<string, Task>();
 const AGENT_TIMEOUT = 10 * 60 * 1000;
+const MAX_CONCURRENT = 2;
+
+let activeCount = 0;
+const queue: { taskId: string; startFn: () => void }[] = [];
+
+function updateQueuePositions() {
+  for (const { taskId } of queue) {
+    const t = tasks.get(taskId);
+    if (t) t.queuePosition = 1; // 简化：排队中的都是第 1 位
+  }
+}
+
+function tryProcessQueue() {
+  while (activeCount < MAX_CONCURRENT && queue.length > 0) {
+    const next = queue.shift()!;
+    activeCount++;
+    next.startFn();
+    updateQueuePositions();
+  }
+}
+
+function releaseSlot() {
+  activeCount = Math.max(0, activeCount - 1);
+  tryProcessQueue();
+}
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
@@ -119,79 +145,78 @@ export async function POST(request: NextRequest) {
     const scriptPath = join(workDir, "run.sh");
     writeFileSync(scriptPath, script, { mode: 0o755 });
 
-    tasks.set(taskId, { status: "running", log: "" });
+    // ===== 启动 agent（带队列）=====
 
-    const child = spawn("/bin/bash", [scriptPath], {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HOME: "/Users/eric" },
-      cwd: "/Users/eric",
-    });
+    const startAgent = () => {
+      tasks.set(taskId, { status: "running", log: "" });
 
-    let logBuffer = "";
-    let settled = false;
+      const child = spawn("/bin/bash", [scriptPath], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, HOME: "/Users/eric" },
+        cwd: "/Users/eric",
+      });
 
-    const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string) => {
-      if (settled) return;
-      settled = true;
-      tasks.set(taskId, { status, html, images, preference_signal: signal, error: errMsg, log: logBuffer.slice(-5000) });
+      let logBuffer = "";
+      let settled = false;
+
+      const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string) => {
+        if (settled) return;
+        settled = true;
+        tasks.set(taskId, { status, html, images, preference_signal: signal, error: errMsg, log: logBuffer.slice(-5000) });
+        releaseSlot();
+      };
+
+      const collectAndFinish = () => {
+        if (!existsSync(indexHtml)) return false;
+        try {
+          const images = collectImages(outputDir);
+          const signal = extractPreferenceSignal(manifestPath);
+          const raw = readFileSync(indexHtml, "utf-8");
+          let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
+          const endIdx = html.lastIndexOf("</html>");
+          if (endIdx !== -1) html = html.substring(0, endIdx + 7);
+          html = embedImages(html, outputDir);
+          finalize("done", html, undefined, images, signal);
+          console.log(`[hermes-cli] ✅ HTML ${html.length} chars, ${images.length} images`);
+          return true;
+        } catch (e: any) {
+          finalize("error", undefined, e.message);
+          return false;
+        }
+      };
+
+      const timer = setTimeout(() => {
+        child.kill("SIGTERM");
+        if (!collectAndFinish()) finalize("error", undefined, "Agent 超时");
+        safeCleanup(workDir);
+      }, AGENT_TIMEOUT);
+
+      child.stdout.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
+      child.stderr.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
+
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        console.log(`[hermes-cli] Task ${taskId} exited code=${code}`);
+        if (collectAndFinish()) { safeCleanup(workDir); return; }
+        const htmlMatch = logBuffer.match(/```html?\s*\n?([\s\S]*?)```/);
+        if (htmlMatch) { finalize("done", htmlMatch[1].trim()); }
+        else { finalize("error", undefined, `Agent 退出码 ${code}`); }
+        safeCleanup(workDir);
+      });
+
+      child.on("error", (err) => { clearTimeout(timer); finalize("error", undefined, err.message); safeCleanup(workDir); });
     };
 
-    const collectAndFinish = () => {
-      if (!existsSync(indexHtml)) return false;
+    // 检查并发
+    if (activeCount >= MAX_CONCURRENT) {
+      tasks.set(taskId, { status: "queued", queuePosition: 1, log: "" });
+      queue.push({ taskId, startFn: startAgent });
+      updateQueuePositions();
+      return NextResponse.json({ taskId, queued: true, queuePosition: 1 });
+    }
 
-      try {
-        const images = collectImages(outputDir);
-        const signal = extractPreferenceSignal(manifestPath);
-
-        const raw = readFileSync(indexHtml, "utf-8");
-        let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
-        const endIdx = html.lastIndexOf("</html>");
-        if (endIdx !== -1) html = html.substring(0, endIdx + 7);
-        html = embedImages(html, outputDir);
-
-        finalize("done", html, undefined, images, signal);
-        console.log(`[hermes-cli] ✅ HTML ${html.length} chars, ${images.length} images, signal: ${signal?.slice(0, 80)}`);
-        return true;
-      } catch (e: any) {
-        finalize("error", undefined, e.message);
-        return false;
-      }
-    };
-
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      if (!collectAndFinish()) {
-        finalize("error", undefined, "Agent 超时，未产出 index.html");
-      }
-      safeCleanup(workDir);
-    }, AGENT_TIMEOUT);
-
-    child.stdout.on("data", (data: Buffer) => {
-      logBuffer += data.toString();
-      appendFileSync(logFile, data);
-    });
-
-    child.stderr.on("data", (data: Buffer) => {
-      logBuffer += data.toString();
-      appendFileSync(logFile, data);
-    });
-
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      console.log(`[hermes-cli] Task ${taskId} exited code=${code}`);
-      if (collectAndFinish()) { safeCleanup(workDir); return; }
-      const htmlMatch = logBuffer.match(/```html?\s*\n?([\s\S]*?)```/);
-      if (htmlMatch) { finalize("done", htmlMatch[1].trim()); }
-      else { finalize("error", undefined, `Agent 退出码 ${code}，未产出 index.html`); }
-      safeCleanup(workDir);
-    });
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      finalize("error", undefined, err.message);
-      safeCleanup(workDir);
-    });
-
+    activeCount++;
+    startAgent();
     return NextResponse.json({ taskId });
   } catch (error: any) {
     rmSync(workDir, { recursive: true, force: true });
