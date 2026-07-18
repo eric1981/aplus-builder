@@ -16,7 +16,7 @@ type Task = {
 };
 
 const tasks = new Map<string, Task>();
-const AGENT_TIMEOUT = 10 * 60 * 1000;
+const AGENT_TIMEOUT = 15 * 60 * 1000; // 15 分钟
 const MAX_CONCURRENT = 2;
 
 let activeCount = 0;
