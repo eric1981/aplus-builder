@@ -27,6 +27,52 @@ type TaskImage = { name: string; base64: string; mime: string };
 
 const DEFAULT_PREFS: Preferences = { style: "auto", odStyle: "", model: "auto" };
 
+// ===== 偏好画像 =====
+
+interface PreferenceProfile {
+  signal: string;                  // LLM 压缩后的画像摘要
+  pending_signals: string[];       // 最近的 raw signal，待压缩
+  stats: { total: number };        // 总生成次数
+}
+
+const PROFILE_KEY = "aplus-builder-profile";
+const MAX_PENDING = 20;
+
+function loadProfile(): PreferenceProfile {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { signal: "", pending_signals: [], stats: { total: 0 } };
+}
+
+function saveProfile(p: PreferenceProfile) {
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {}
+}
+
+function addSignal(profile: PreferenceProfile, signal: string): PreferenceProfile {
+  profile.pending_signals.push(signal);
+  profile.stats.total++;
+  // 超过阈值触发压缩（简化版：保留最近 20 条，取第一条做 signal）
+  if (profile.pending_signals.length > MAX_PENDING) {
+    const recent = profile.pending_signals.slice(-10);
+    // 简单压缩：最新一条作为 signal，保留最后 10 条 pending
+    profile.signal = recent[recent.length - 1];
+    profile.pending_signals = recent;
+  }
+  return profile;
+}
+
+function getProfileContext(profile: PreferenceProfile): string {
+  const parts: string[] = [];
+  if (profile.signal) parts.push(`画像: ${profile.signal}`);
+  if (profile.pending_signals.length > 0) {
+    const recent = profile.pending_signals.slice(-3);
+    parts.push(`最近: ${recent.join(" | ")}`);
+  }
+  return parts.join("\n");
+}
+
 // ===== 5 种内置风格（可视化卡片）=====
 
 const STYLE_OPTIONS: { value: BuiltinStyle; label: string; desc: string; preview: React.ReactNode; className: string }[] = [
@@ -180,6 +226,12 @@ export default function Home() {
           setImages(task.images || []);
           setGenerating(false);
           saveState({ generatedHtml: task.html });
+
+          // 存偏好信号到画像
+          if (task.preference_signal) {
+            const profile = addSignal(loadProfile(), task.preference_signal);
+            saveProfile(profile);
+          }
         } else if (task.status === "error") {
           clearInterval(pollRef.current!);
           pollRef.current = null;
@@ -202,6 +254,13 @@ export default function Home() {
       formData.append("image_0", imageFile);
       formData.append("description", description);
       formData.append("preferences", JSON.stringify(prefs));
+
+      // 注入偏好画像（用户没选的维度，agent 参考用）
+      const profile = loadProfile();
+      if (profile.stats.total > 0) {
+        const ctx = getProfileContext(profile);
+        if (ctx) formData.append("profile_context", ctx);
+      }
 
       const res = await fetch("/api/generate", { method: "POST", body: formData });
       const data = await res.json();
