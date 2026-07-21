@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import JSZip from "jszip";
 
 const STORAGE_KEY = "aplus-builder-state";
 const POLL_INTERVAL = 3000;
@@ -198,6 +197,7 @@ export default function Home() {
   const [showPrefs, setShowPrefs] = useState(false);
   const [credits, setCredits] = useState(0);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -337,19 +337,41 @@ export default function Home() {
   const handleDownloadImage = (img: TaskImage) => downloadDataUrl(img.base64, img.mime, img.name);
 
   const handleDownloadAll = async () => {
-    const zip = new JSZip();
-    zip.file("aplus-detail.html", generatedHtml);
-    for (const img of images) zip.file(img.name, img.base64, { base64: true });
-    const blob = await zip.generateAsync({ type: "blob" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "aplus-detail.zip"; a.click();
-    URL.revokeObjectURL(url);
+    setDownloadProgress(0);
+
+    const worker = new Worker("/workers/zip-worker.js");
+
+    worker.onmessage = (e: MessageEvent) => {
+      const { type, blob, percent, processed, total } = e.data;
+      if (type === "progress") {
+        if (percent != null) setDownloadProgress(percent);
+        else if (processed != null && total > 0) setDownloadProgress(Math.round((processed / total) * 100));
+      } else if (type === "complete") {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "aplus-detail.zip"; a.click();
+        URL.revokeObjectURL(url);
+        setDownloadProgress(0);
+        worker.terminate();
+      } else if (type === "error") {
+        alert("打包失败：" + e.data.error);
+        setDownloadProgress(0);
+        worker.terminate();
+      }
+    };
+
+    worker.onerror = () => {
+      alert("ZIP Worker 异常，请重试。");
+      setDownloadProgress(0);
+      worker.terminate();
+    };
+
+    worker.postMessage({ images, html: generatedHtml });
   };
 
   const handleReset = () => {
     setImage(null); setImageFile(null); setGeneratedHtml(""); setImages([]);
-    setDescription(""); setError(""); setAgentLog("");
+    setDescription(""); setError(""); setAgentLog(""); setDownloadProgress(0);
     localStorage.removeItem(STORAGE_KEY);
   };
 
@@ -389,12 +411,28 @@ export default function Home() {
               <div className="flex gap-2">
                 <button onClick={handleDownloadHtml} className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">⬇ HTML</button>
                 {images.length > 0 && (
-                  <button onClick={handleDownloadAll} className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand-hover transition-colors">⬇ 全部 (.zip)</button>
+                  downloadProgress > 0 ? (
+                    <div className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium flex items-center gap-2">
+                      <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      {downloadProgress}%
+                    </div>
+                  ) : (
+                    <button onClick={handleDownloadAll} className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand-hover transition-colors">⬇ 全部 (.zip)</button>
+                  )
                 )}
               </div>
             </div>
             <div className="border border-border rounded-xl overflow-hidden bg-white shadow-sm">
-              <iframe srcDoc={generatedHtml} className="w-full" style={{ height: "70vh", border: "none" }} title="预览" />
+              <iframe srcDoc={generatedHtml} className="w-full" style={{ height: "70vh", border: "none" }} title="预览"
+                onLoad={(e) => {
+                  try {
+                    const doc = (e.target as HTMLIFrameElement).contentDocument;
+                    if (doc) {
+                      const h = doc.documentElement.scrollHeight;
+                      (e.target as HTMLIFrameElement).style.height = Math.max(h, 400) + "px";
+                    }
+                  } catch {}
+                }} />
             </div>
             {images.length > 0 && (
               <div className="space-y-3">
