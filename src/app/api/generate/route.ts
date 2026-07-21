@@ -9,6 +9,7 @@ type Task = {
   status: "running" | "done" | "error" | "queued";
   html?: string;
   images?: TaskImage[];
+  variants?: { name: string; html: string }[];
   preference_signal?: string;
   error?: string;
   log?: string;
@@ -101,6 +102,20 @@ export async function POST(request: NextRequest) {
       };
       prefLines.push(`- 排版风格：${styleLabel[uiPrefs.style] || uiPrefs.style}（用户指定，必须使用）`);
     }
+
+    // ---- 多版本变体 ----
+    const styleLabel: Record<string, string> = {
+      "editorial": "Editorial 暖杂志风", "swiss": "Swiss 瑞士风",
+      "product-launch": "Product Launch 暗底Hero风", "xhs-pastel": "小红书 Pastel 马卡龙风",
+      "amazon-premium": "Amazon Premium A+ 原生风",
+    };
+    const ALL_STYLES = ["Editorial 暖杂志风", "Swiss 瑞士风", "Product Launch 暗底Hero风"];
+    const variantStyles = (() => {
+      if (uiPrefs.odStyle) return ALL_STYLES;
+      if (!uiPrefs.style || uiPrefs.style === "auto") return ALL_STYLES;
+      const selected = styleLabel[uiPrefs.style] || "";
+      return ALL_STYLES.filter((s) => !s.startsWith(selected.slice(0, 4))).slice(0, 2);
+    })();
     if (uiPrefs.model && uiPrefs.model !== "auto") {
       const modelLabel: Record<string, string> = { "east-asian": "东亚", "european": "欧美", "middle-eastern": "中东/混血" };
       prefLines.push(`- 模特：${modelLabel[uiPrefs.model] || uiPrefs.model}（用户指定，必须使用）`);
@@ -130,6 +145,12 @@ export async function POST(request: NextRequest) {
       `- HTML 里的图片使用相对路径（如 ./scene_01.png）。`,
       `- 生成完成后直接写入 index.html，不要无限迭代优化。`,
       `- 在 image-manifest.json 中记录每张图使用的 prompt。`,
+      ``,
+      `【多版本输出 — 使用同一套图片，生成多个风格变体】`,
+      `- 主输出（用户选的风格）：${outputDir}/index.html`,
+      ...variantStyles.map((s, i) => `- 变体 ${i + 1}（${s}）：${outputDir}/variant_${i + 1}.html`),
+      `- 所有变体 HTML 都必须包含相同的一套图片，只改变排版/字体/颜色/布局。`,
+      `- 文件名必须严格使用 index.html、variant_1.html、variant_2.html。`,
     ].join("\n");
 
     writeFileSync(promptFile, prompt, "utf-8");
@@ -159,11 +180,24 @@ export async function POST(request: NextRequest) {
       let logBuffer = "";
       let settled = false;
 
-      const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string) => {
+      const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string, variants?: { name: string; html: string }[]) => {
         if (settled) return;
         settled = true;
-        tasks.set(taskId, { status, html, images, preference_signal: signal, error: errMsg, log: logBuffer.slice(-5000) });
+        tasks.set(taskId, { status, html, images, variants, preference_signal: signal, error: errMsg, log: logBuffer.slice(-5000) });
         releaseSlot();
+      };
+
+      const readAndEmbed = (filePath: string): string | null => {
+        if (!existsSync(filePath)) return null;
+        try {
+          const raw = readFileSync(filePath, "utf-8");
+          let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
+          const endIdx = html.lastIndexOf("</html>");
+          if (endIdx !== -1) html = html.substring(0, endIdx + 7);
+          return embedImages(html, outputDir);
+        } catch {
+          return null;
+        }
       };
 
       const collectAndFinish = () => {
@@ -171,13 +205,20 @@ export async function POST(request: NextRequest) {
         try {
           const images = collectImages(outputDir);
           const signal = extractPreferenceSignal(manifestPath);
-          const raw = readFileSync(indexHtml, "utf-8");
-          let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
-          const endIdx = html.lastIndexOf("</html>");
-          if (endIdx !== -1) html = html.substring(0, endIdx + 7);
-          html = embedImages(html, outputDir);
-          finalize("done", html, undefined, images, signal);
-          console.log(`[hermes-cli] ✅ HTML ${html.length} chars, ${images.length} images`);
+          const html = readAndEmbed(indexHtml);
+          if (!html) throw new Error("Failed to read index.html");
+
+          // 收集变体
+          const variants: { name: string; html: string }[] = [];
+          const variantNames = ["Swiss 瑞士风", "Product Launch 暗底Hero风", "Editorial 暖杂志风"];
+          for (let i = 1; i <= variantStyles.length; i++) {
+            const vPath = join(outputDir, `variant_${i}.html`);
+            const vHtml = readAndEmbed(vPath);
+            if (vHtml) variants.push({ name: variantStyles[i - 1] || `变体 ${i}`, html: vHtml });
+          }
+
+          finalize("done", html, undefined, images, signal, variants.length > 0 ? variants : undefined);
+          console.log(`[hermes-cli] ✅ HTML ${html.length} chars, ${images.length} images, ${variants.length} variants`);
           return true;
         } catch (e: any) {
           finalize("error", undefined, e.message);

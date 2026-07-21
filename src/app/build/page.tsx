@@ -38,6 +38,7 @@ interface SavedState {
 }
 
 type TaskImage = { name: string; base64: string; mime: string };
+type TaskVariant = { name: string; html: string };
 
 const DEFAULT_PREFS: Preferences = { style: "auto", odStyle: "", model: "auto" };
 
@@ -219,6 +220,8 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [generatedHtml, setGeneratedHtml] = useState("");
   const [images, setImages] = useState<TaskImage[]>([]);
+  const [variants, setVariants] = useState<TaskVariant[]>([]);
+  const [activeVariant, setActiveVariant] = useState(0); // 0 = 主输出, 1+ = 变体
   const [error, setError] = useState("");
   const [agentLog, setAgentLog] = useState("");
   const [hydrated, setHydrated] = useState(false);
@@ -284,6 +287,8 @@ export default function Home() {
           pollRef.current = null;
           setGeneratedHtml(task.html);
           setImages(task.images || []);
+          setVariants(task.variants || []);
+          setActiveVariant(0);
           setGenerating(false);
           setQueuePosition(null);
           saveState({ generatedHtml: task.html });
@@ -326,7 +331,7 @@ export default function Home() {
       return;
     }
 
-    setGenerating(true); setError(""); setGeneratedHtml(""); setImages([]); setAgentLog(""); setQueuePosition(null); setRating(null);
+    setGenerating(true); setError(""); setGeneratedHtml(""); setImages([]); setVariants([]); setAgentLog(""); setQueuePosition(null); setRating(null);
 
     try {
       const formData = new FormData();
@@ -369,7 +374,8 @@ export default function Home() {
   };
 
   const handleDownloadHtml = () => {
-    const blob = new Blob([generatedHtml], { type: "text/html" });
+    const html = activeVariant === 0 ? generatedHtml : variants[activeVariant - 1]?.html || generatedHtml;
+    const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = "aplus-detail.html"; a.click();
@@ -412,9 +418,9 @@ export default function Home() {
   };
 
   const handleReset = () => {
-    setImage(null); setImageFile(null); setGeneratedHtml(""); setImages([]);
+    setImage(null); setImageFile(null); setGeneratedHtml(""); setImages([]); setVariants([]);
     setDescription(""); setError(""); setAgentLog(""); setDownloadProgress(0);
-    setRating(null);
+    setRating(null); setActiveVariant(0);
     localStorage.removeItem(STORAGE_KEY);
   };
 
@@ -488,10 +494,49 @@ export default function Home() {
         {/* ===== 结果预览 ===== */}
         {generatedHtml ? (
           <div className="space-y-4">
+            {/* 变体标签栏 */}
+            {variants.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                <button
+                  onClick={() => setActiveVariant(0)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                    activeVariant === 0
+                      ? "bg-brand text-white"
+                      : "bg-gray-100 text-text-muted hover:bg-gray-200"
+                  }`}
+                >
+                  我的选择
+                </button>
+                {variants.map((v, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setActiveVariant(i + 1)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                      activeVariant === i + 1
+                        ? "bg-brand text-white"
+                        : "bg-gray-100 text-text-muted hover:bg-gray-200"
+                    }`}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* 标题栏 */}
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-base sm:text-lg font-semibold">A+ 详情预览</h2>
-                <p className="text-text-muted text-xs sm:text-sm">{Math.round(generatedHtml.length / 1024)}KB · {images.length} 张图</p>
+                <h2 className="text-base sm:text-lg font-semibold">
+                  A+ 详情预览
+                  {variants.length > 0 && (
+                    <span className="text-xs text-text-muted font-normal ml-2">
+                      {activeVariant === 0 ? "我的选择" : variants[activeVariant - 1]?.name}
+                    </span>
+                  )}
+                </h2>
+                <p className="text-text-muted text-xs sm:text-sm">
+                  {Math.round((activeVariant === 0 ? generatedHtml : variants[activeVariant - 1]?.html || "").length / 1024)}KB · {images.length} 张图
+                </p>
               </div>
               <div className="flex gap-1.5 sm:gap-2">
                 {/* 打分 */}
@@ -509,7 +554,9 @@ export default function Home() {
                     👎
                   </button>
                 </div>
-                <button onClick={handleDownloadHtml} className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">⬇ HTML</button>
+                <button onClick={handleDownloadHtml} className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
+                  ⬇ {activeVariant === 0 ? "HTML" : "此版本"}
+                </button>
                 {images.length > 0 && (
                   downloadProgress > 0 ? (
                     <div className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium flex items-center gap-2">
@@ -522,8 +569,14 @@ export default function Home() {
                 )}
               </div>
             </div>
+
+            {/* 预览 iframe */}
             <div className="border border-border rounded-xl overflow-hidden bg-white shadow-sm">
-              <iframe srcDoc={generatedHtml} className="w-full" style={{ height: "70vh", border: "none" }} title="预览"
+              <iframe
+                srcDoc={activeVariant === 0 ? generatedHtml : variants[activeVariant - 1]?.html || ""}
+                className="w-full"
+                style={{ height: "70vh", border: "none" }}
+                title="预览"
                 onLoad={(e) => {
                   try {
                     const doc = (e.target as HTMLIFrameElement).contentDocument;
@@ -532,8 +585,10 @@ export default function Home() {
                       (e.target as HTMLIFrameElement).style.height = Math.max(h, 400) + "px";
                     }
                   } catch {}
-                }} />
+                }}
+              />
             </div>
+
             {images.length > 0 && (
               <div className="space-y-3">
                 <h3 className="text-sm font-medium text-text-muted">生成图片（{images.length} 张，点击下载）</h3>
