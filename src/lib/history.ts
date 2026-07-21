@@ -123,3 +123,14 @@ export async function getHistory(): Promise<HistoryEntry[]> {
     req.onerror = () => reject(req.error);
   });
 }
+
+export async function deleteFromHistory(id: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    store.delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}

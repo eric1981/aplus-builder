@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { saveToHistory, getHistory, deleteFromHistory, type HistoryEntry } from "../../lib/history";
 
 const STORAGE_KEY = "aplus-builder-state";
 const POLL_INTERVAL = 3000;
@@ -195,6 +196,20 @@ function saveState(state: Partial<SavedState>) {
   } catch {}
 }
 
+// ===== 工具 =====
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "刚刚";
+  if (diffMin < 60) return `${diffMin} 分钟前`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} 小时前`;
+  return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 // ===== UI =====
 
 export default function Home() {
@@ -212,6 +227,9 @@ export default function Home() {
   const [credits, setCredits] = useState(0);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -223,6 +241,8 @@ export default function Home() {
     if (saved?.generatedHtml) setGeneratedHtml(saved.generatedHtml);
     if (saved?.preferences) setPrefs(saved.preferences);
     setCredits(loadCredits());
+    getHistory().then(setHistoryEntries).catch(() => {});
+    setProfileLoaded(loadProfile().stats.total > 0);
     setHydrated(true);
   }, []);
 
@@ -272,6 +292,13 @@ export default function Home() {
             const profile = addSignal(loadProfile(), task.preference_signal);
             saveProfile(profile);
           }
+
+          // 存到历史记录
+          saveToHistory({
+            description,
+            html: task.html,
+            images: task.images || [],
+          }).then(() => getHistory().then(setHistoryEntries)).catch(() => {});
         } else if (task.status === "error") {
           clearInterval(pollRef.current!);
           pollRef.current = null;
@@ -389,6 +416,23 @@ export default function Home() {
     localStorage.removeItem(STORAGE_KEY);
   };
 
+  // ========== 历史记录 ==========
+
+  const restoreHistory = (entry: HistoryEntry) => {
+    setGeneratedHtml(entry.html);
+    setImages(entry.images.map((img) => ({ name: img.name, base64: img.base64, mime: img.mime })));
+    setDescription(entry.description || "");
+    setShowHistory(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const deleteHistory = async (id: string) => {
+    try {
+      await deleteFromHistory(id);
+      setHistoryEntries((prev) => prev.filter((e) => e.id !== id));
+    } catch {}
+  };
+
   // ========== 渲染 ==========
 
   return (
@@ -400,12 +444,23 @@ export default function Home() {
             <h1 className="text-lg font-semibold tracking-tight flex items-center gap-2">
               A+ 详情生成
               <span className="text-xs font-normal text-text-muted bg-gray-100 px-2 py-0.5 rounded">Duma Agent</span>
+              {profileLoaded && (
+                <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded" title="偏好画像已激活，AI 会根据历史记录学习你的偏好">
+                  🧠 学习中
+                </span>
+              )}
             </h1>
           </div>
           <div className="flex items-center gap-3">
             <span className={`text-xs font-medium ${credits <= 2 ? "text-red-500" : credits <= 5 ? "text-orange-500" : "text-text-muted"}`}>
               {credits} 积分
             </span>
+            {historyEntries.length > 0 && (
+              <button onClick={() => setShowHistory(!showHistory)}
+                className={`text-xs font-medium px-2 py-1 rounded transition-colors ${showHistory ? "bg-brand/10 text-brand" : "text-text-muted hover:text-brand"}`}>
+                📋 历史 ({historyEntries.length})
+              </button>
+            )}
             {generatedHtml && (
               <button onClick={handleReset} className="text-sm text-text-muted hover:text-brand">新建</button>
             )}
@@ -635,6 +690,51 @@ export default function Home() {
               )}
             </button>
           </>
+        )}
+
+        {/* ===== 历史记录面板 ===== */}
+        {showHistory && historyEntries.length > 0 && (
+          <div className="border-t border-border pt-6 mt-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">历史记录</h2>
+              <button onClick={() => setShowHistory(false)} className="text-xs text-text-muted hover:text-brand">关闭</button>
+            </div>
+            <div className="space-y-3">
+              {historyEntries.map((entry) => (
+                <div key={entry.id}
+                  className="flex items-center gap-3 p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow group">
+                  {/* 缩略图 */}
+                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                    {entry.thumbnail ? (
+                      <img src={entry.thumbnail} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-lg">📄</div>
+                    )}
+                  </div>
+                  {/* 信息 */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {entry.description || "无描述"}
+                    </p>
+                    <p className="text-xs text-text-muted mt-0.5">
+                      {formatTime(entry.timestamp)} · {entry.imageCount} 张图 · {Math.round(entry.htmlSize / 1024)}KB
+                    </p>
+                  </div>
+                  {/* 操作 */}
+                  <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => restoreHistory(entry)}
+                      className="px-2 py-1 text-[11px] bg-brand text-white rounded hover:bg-brand-hover transition-colors">
+                      恢复
+                    </button>
+                    <button onClick={() => deleteHistory(entry.id)}
+                      className="px-2 py-1 text-[11px] border border-border rounded hover:bg-red-50 hover:border-red-200 text-text-muted hover:text-red-500 transition-colors">
+                      删除
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
