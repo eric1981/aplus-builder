@@ -5,6 +5,20 @@ import { useState, useCallback, useRef, useEffect } from "react";
 const STORAGE_KEY = "aplus-builder-state";
 const POLL_INTERVAL = 3000;
 
+// 全局 JS 错误兜底（ngrok 等代理可能注入脚本导致静默崩溃）
+if (typeof window !== "undefined") {
+  let errorCount = 0;
+  window.addEventListener("error", (e) => {
+    errorCount++;
+    if (errorCount <= 3) {
+      console.error("[aplus-builder] JS Error:", e.message, e.filename, e.lineno);
+    }
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    console.error("[aplus-builder] Unhandled Rejection:", e.reason);
+  });
+}
+
 // ===== 类型 =====
 
 type BuiltinStyle = "auto" | "editorial" | "swiss" | "product-launch" | "xhs-pastel" | "amazon-premium";

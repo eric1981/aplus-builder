@@ -1,10 +1,6 @@
-"use client";
-
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Landing() {
-  const router = useRouter();
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       {/* Hero */}
@@ -22,12 +18,12 @@ export default function Landing() {
         <p className="text-sm text-text-muted max-w-lg mx-auto mb-10">
           产品特征分析 → 多场景图生成 → A+ 详情页排版 → 一键下载交付
         </p>
-        <button
-          onClick={() => router.push("/build")}
-          className="px-8 py-3.5 bg-brand text-white rounded-xl text-base font-medium hover:bg-brand-hover transition-colors shadow-lg shadow-brand/20"
+        <Link
+          href="/build"
+          className="inline-block px-8 py-3.5 bg-brand text-white rounded-xl text-base font-medium hover:bg-brand-hover transition-colors shadow-lg shadow-brand/20"
         >
           ✨ 开始使用
-        </button>
+        </Link>
       </div>
 
       {/* 三步流程 */}

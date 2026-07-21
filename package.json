@@ -7,6 +7,7 @@
     "dev:bare": "next dev",
     "build": "next build",
     "start": "node scripts/dev.mjs",
+    "prod": "next build && next start -p 3000",
     "lint": "eslint"
   },
   "dependencies": {
