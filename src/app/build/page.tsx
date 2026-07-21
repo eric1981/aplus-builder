@@ -230,6 +230,7 @@ export default function Home() {
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [rating, setRating] = useState<"liked" | "disliked" | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -325,7 +326,7 @@ export default function Home() {
       return;
     }
 
-    setGenerating(true); setError(""); setGeneratedHtml(""); setImages([]); setAgentLog(""); setQueuePosition(null);
+    setGenerating(true); setError(""); setGeneratedHtml(""); setImages([]); setAgentLog(""); setQueuePosition(null); setRating(null);
 
     try {
       const formData = new FormData();
@@ -413,7 +414,22 @@ export default function Home() {
   const handleReset = () => {
     setImage(null); setImageFile(null); setGeneratedHtml(""); setImages([]);
     setDescription(""); setError(""); setAgentLog(""); setDownloadProgress(0);
+    setRating(null);
     localStorage.removeItem(STORAGE_KEY);
+  };
+
+  // ========== 打分 ==========
+
+  const handleRate = (dir: "liked" | "disliked") => {
+    setRating(dir);
+    const profile = loadProfile();
+    const prefix = dir === "liked" ? "👍 喜欢" : "👎 不喜欢";
+    // 将评分作为偏好信号追加，影响后续生成的画像
+    const signal = profile.signal
+      ? `${profile.signal}（${prefix}）`
+      : prefix;
+    addSignal(profile, signal);
+    saveProfile(profile);
   };
 
   // ========== 历史记录 ==========
@@ -438,12 +454,12 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-border">
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => window.location.href = "/"} className="text-text-muted hover:text-brand text-sm">← 首页</button>
-            <h1 className="text-lg font-semibold tracking-tight flex items-center gap-2">
-              A+ 详情生成
-              <span className="text-xs font-normal text-text-muted bg-gray-100 px-2 py-0.5 rounded">Duma Agent</span>
+        <div className="max-w-2xl mx-auto px-3 sm:px-4 h-12 sm:h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <button onClick={() => window.location.href = "/"} className="text-text-muted hover:text-brand text-xs sm:text-sm flex-shrink-0">←</button>
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight flex items-center gap-1.5 sm:gap-2 truncate">
+              <span className="hidden sm:inline">A+ 详情生成</span>
+              <span className="text-xs font-normal text-text-muted bg-gray-100 px-1.5 sm:px-2 py-0.5 rounded truncate">Duma</span>
               {profileLoaded && (
                 <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded" title="偏好画像已激活，AI 会根据历史记录学习你的偏好">
                   🧠 学习中
@@ -451,14 +467,14 @@ export default function Home() {
               )}
             </h1>
           </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-xs font-medium ${credits <= 2 ? "text-red-500" : credits <= 5 ? "text-orange-500" : "text-text-muted"}`}>
-              {credits} 积分
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+            <span className={`text-[10px] sm:text-xs font-medium ${credits <= 2 ? "text-red-500" : credits <= 5 ? "text-orange-500" : "text-text-muted"}`}>
+              {credits}积分
             </span>
             {historyEntries.length > 0 && (
               <button onClick={() => setShowHistory(!showHistory)}
-                className={`text-xs font-medium px-2 py-1 rounded transition-colors ${showHistory ? "bg-brand/10 text-brand" : "text-text-muted hover:text-brand"}`}>
-                📋 历史 ({historyEntries.length})
+                className={`text-[10px] sm:text-xs font-medium px-1.5 sm:px-2 py-1 rounded transition-colors whitespace-nowrap ${showHistory ? "bg-brand/10 text-brand" : "text-text-muted hover:text-brand"}`}>
+                📋{historyEntries.length}
               </button>
             )}
             {generatedHtml && (
@@ -468,16 +484,31 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
+      <div className="max-w-2xl mx-auto px-3 sm:px-4 py-6 sm:py-8 space-y-6 sm:space-y-8">
         {/* ===== 结果预览 ===== */}
         {generatedHtml ? (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">A+ 详情预览</h2>
-                <p className="text-text-muted text-sm">{Math.round(generatedHtml.length / 1024)}KB · {images.length} 张图</p>
+                <h2 className="text-base sm:text-lg font-semibold">A+ 详情预览</h2>
+                <p className="text-text-muted text-xs sm:text-sm">{Math.round(generatedHtml.length / 1024)}KB · {images.length} 张图</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-1.5 sm:gap-2">
+                {/* 打分 */}
+                <div className="flex items-center gap-0.5 sm:gap-1 mr-0.5 sm:mr-1">
+                  <button onClick={() => handleRate("liked")}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all ${
+                      rating === "liked" ? "bg-green-100 text-green-600 scale-110" : "bg-gray-50 text-gray-400 hover:bg-green-50 hover:text-green-500"
+                    }`} title="喜欢这个结果">
+                    👍
+                  </button>
+                  <button onClick={() => handleRate("disliked")}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all ${
+                      rating === "disliked" ? "bg-red-100 text-red-500 scale-110" : "bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    }`} title="不喜欢这个结果">
+                    👎
+                  </button>
+                </div>
                 <button onClick={handleDownloadHtml} className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">⬇ HTML</button>
                 {images.length > 0 && (
                   downloadProgress > 0 ? (
@@ -506,7 +537,7 @@ export default function Home() {
             {images.length > 0 && (
               <div className="space-y-3">
                 <h3 className="text-sm font-medium text-text-muted">生成图片（{images.length} 张，点击下载）</h3>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                   {images.map((img) => (
                     <div key={img.name} onClick={() => handleDownloadImage(img)}
                       className="group relative aspect-[3/4] rounded-lg overflow-hidden bg-gray-100 border border-border cursor-pointer hover:ring-2 hover:ring-brand/30 transition-all">
@@ -553,20 +584,20 @@ export default function Home() {
           <>
             {/* ===== 上传区 ===== */}
             <div>
-              <h2 className="text-lg font-semibold mb-1">产品图片</h2>
-              <p className="text-text-muted text-sm mb-4">上传一张白底产品图，Agent 自动分析特征 → 生成多场景图 → 输出 A+ 详情页</p>
+              <h2 className="text-base sm:text-lg font-semibold mb-1">产品图片</h2>
+              <p className="text-text-muted text-xs sm:text-sm mb-4">上传一张白底产品图，Agent 自动分析特征 → 生成多场景图 → 输出 A+ 详情页</p>
               {image ? (
-                <div className="relative w-48 aspect-[3/4] rounded-xl overflow-hidden bg-gray-100 shadow-sm">
+                <div className="relative w-36 sm:w-48 aspect-[3/4] rounded-xl overflow-hidden bg-gray-100 shadow-sm">
                   <img src={image} alt="产品图" className="w-full h-full object-cover" />
                   <button onClick={removeImage} className="absolute top-2 right-2 w-7 h-7 bg-black/60 text-white rounded-full flex items-center justify-center text-sm hover:bg-black/80 transition-colors">✕</button>
                 </div>
               ) : (
                 <div onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={handleDrop}
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-border rounded-xl p-12 text-center cursor-pointer hover:border-brand/30 transition-colors">
-                  <div className="text-3xl mb-2">📷</div>
-                  <p className="text-text-muted text-sm">拖拽或点击上传产品图</p>
-                  <p className="text-text-muted text-xs mt-1">JPG / PNG / WebP</p>
+                  className="border-2 border-dashed border-border rounded-xl p-8 sm:p-12 text-center cursor-pointer hover:border-brand/30 transition-colors">
+                  <div className="text-2xl sm:text-3xl mb-2">📷</div>
+                  <p className="text-text-muted text-xs sm:text-sm">拖拽或点击上传产品图</p>
+                  <p className="text-text-muted text-[10px] sm:text-xs mt-1">JPG / PNG / WebP</p>
                   <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
                     onChange={(e) => handleImageUpload(e.target.files?.[0] || null)} />
                 </div>
@@ -575,8 +606,8 @@ export default function Home() {
 
             {/* ===== 描述区 ===== */}
             <div>
-              <h2 className="text-lg font-semibold mb-1">产品描述 <span className="text-text-muted text-sm font-normal ml-2">（可选）</span></h2>
-              <p className="text-text-muted text-sm mb-4">不填也行，Agent 会根据图片自动分析。</p>
+              <h2 className="text-base sm:text-lg font-semibold mb-1">产品描述 <span className="text-text-muted text-xs sm:text-sm font-normal ml-2">（可选）</span></h2>
+              <p className="text-text-muted text-xs sm:text-sm mb-4">不填也行，Agent 会根据图片自动分析。</p>
               <textarea value={description} onChange={(e) => setDescription(e.target.value)}
                 placeholder="例如：法式复古连衣裙，高支棉质面料，方领设计，收腰A字版型。品牌ÉTINCELLE。"
                 rows={3}
@@ -599,7 +630,7 @@ export default function Home() {
                   {/* 5 种内置风格 */}
                   <div>
                     <label className="block text-sm font-medium mb-3">排版风格</label>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                       {STYLE_OPTIONS.map((opt) => (
                         <button key={opt.value}
                           onClick={() => setPrefs({ ...prefs, style: opt.value, odStyle: "" })}
@@ -639,7 +670,7 @@ export default function Home() {
                   {/* 模特 */}
                   <div>
                     <label className="block text-sm font-medium mb-3">模特偏好</label>
-                    <div className="grid grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                       {MODEL_OPTIONS.map((opt) => (
                         <button key={opt.value} onClick={() => setPrefs({ ...prefs, model: opt.value })}
                           className={`relative rounded-xl overflow-hidden transition-all ${
@@ -696,15 +727,15 @@ export default function Home() {
         {showHistory && historyEntries.length > 0 && (
           <div className="border-t border-border pt-6 mt-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">历史记录</h2>
+              <h2 className="text-base sm:text-lg font-semibold">历史记录</h2>
               <button onClick={() => setShowHistory(false)} className="text-xs text-text-muted hover:text-brand">关闭</button>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {historyEntries.map((entry) => (
                 <div key={entry.id}
-                  className="flex items-center gap-3 p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow group">
+                  className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow group">
                   {/* 缩略图 */}
-                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                  <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
                     {entry.thumbnail ? (
                       <img src={entry.thumbnail} alt="" className="w-full h-full object-cover" />
                     ) : (
@@ -720,8 +751,8 @@ export default function Home() {
                       {formatTime(entry.timestamp)} · {entry.imageCount} 张图 · {Math.round(entry.htmlSize / 1024)}KB
                     </p>
                   </div>
-                  {/* 操作 */}
-                  <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* 操作 — 手机上常显，桌面 hover */}
+                  <div className="flex gap-1 sm:gap-1.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                     <button onClick={() => restoreHistory(entry)}
                       className="px-2 py-1 text-[11px] bg-brand text-white rounded hover:bg-brand-hover transition-colors">
                       恢复
