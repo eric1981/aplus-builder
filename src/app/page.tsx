@@ -43,6 +43,92 @@ export default function Landing() {
         </div>
       </div>
 
+      {/* 模板画廊 */}
+      <div className="max-w-5xl mx-auto px-4 pb-12 sm:pb-16">
+        <div className="text-center mb-8">
+          <h2 className="text-xl sm:text-2xl font-bold mb-2">同款产品，三种风格</h2>
+          <p className="text-sm text-text-muted">每张图仅需 2-5 分钟，AI 自动完成全流程</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+          {/* Editorial */}
+          <Link href="/build" className="group block">
+            <div className="bg-[#FBFBFA] rounded-2xl overflow-hidden border border-border shadow-sm hover:shadow-md transition-all">
+              <div className="aspect-[4/3] relative overflow-hidden">
+                <img
+                  src="https://images.pexels.com/photos/19895960/pexels-photo-19895960.jpeg?auto=compress&cs=tinysrgb&h=400"
+                  alt="Editorial style preview"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  loading="lazy"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#FBFBFA] via-transparent to-transparent" />
+                <div className="absolute bottom-3 left-4 right-4">
+                  <div className="space-y-1.5">
+                    <div className="h-2 w-16 rounded-full bg-[#D4A0A0]/80" />
+                    <div className="h-1 w-12 rounded-full bg-[#C0C0BB]" />
+                    <div className="h-1.5 w-20 rounded-full bg-[#E8E8E5]" />
+                  </div>
+                </div>
+              </div>
+              <div className="p-4">
+                <h3 className="font-serif text-sm font-semibold text-[#4A4A45]">Editorial 暖杂志</h3>
+                <p className="text-[11px] text-[#999] mt-1">衬线体 · 圆角卡 · 暖白底 — 法式慵懒质感</p>
+              </div>
+            </div>
+          </Link>
+
+          {/* Swiss */}
+          <Link href="/build" className="group block">
+            <div className="bg-white rounded-2xl overflow-hidden border border-border shadow-sm hover:shadow-md transition-all">
+              <div className="aspect-[4/3] relative overflow-hidden">
+                <img
+                  src="https://images.pexels.com/photos/7772548/pexels-photo-7772548.jpeg?auto=compress&cs=tinysrgb&h=400"
+                  alt="Swiss style preview"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  loading="lazy"
+                />
+                <div className="absolute bottom-3 left-4 right-4">
+                  <div className="space-y-1.5">
+                    <div className="h-2.5 w-20 bg-[#111]" />
+                    <div className="h-px w-16 bg-[#666]" />
+                    <div className="h-1.5 w-14 bg-[#111]" />
+                  </div>
+                </div>
+              </div>
+              <div className="p-4">
+                <h3 className="font-sans text-sm font-bold tracking-tight text-[#111]">Swiss 瑞士风</h3>
+                <p className="text-[11px] text-[#888] mt-1">无衬线 · 全直角 · 黑白灰 — 极简功能美学</p>
+              </div>
+            </div>
+          </Link>
+
+          {/* Product Launch */}
+          <Link href="/build" className="group block">
+            <div className="bg-[#1A1A1A] rounded-2xl overflow-hidden border border-border shadow-sm hover:shadow-md transition-all">
+              <div className="aspect-[4/3] relative overflow-hidden">
+                <img
+                  src="https://images.pexels.com/photos/6312177/pexels-photo-6312177.jpeg?auto=compress&cs=tinysrgb&h=400"
+                  alt="Product Launch style preview"
+                  className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-500"
+                  loading="lazy"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#1A1A1A] via-[#1A1A1A]/40 to-transparent" />
+                <div className="absolute bottom-3 left-4 right-4">
+                  <div className="space-y-1.5">
+                    <div className="h-px w-14 bg-[#F97316]/60" />
+                    <div className="h-2.5 w-24 bg-[#F97316]/40 rounded-sm" />
+                    <div className="h-px w-18 bg-[#F97316]/30" />
+                  </div>
+                </div>
+              </div>
+              <div className="p-4">
+                <h3 className="text-sm font-semibold text-white">Product Launch</h3>
+                <p className="text-[11px] text-white/50 mt-1">暗底Hero · 暖橙渐变 — 爆品质感冲击</p>
+              </div>
+            </div>
+          </Link>
+        </div>
+      </div>
+
       {/* 特性 */}
       <div className="max-w-4xl mx-auto px-4 pb-16 sm:pb-20">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-center">
