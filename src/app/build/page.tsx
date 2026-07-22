@@ -237,6 +237,7 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
 
   // 客户端水合
   useEffect(() => {
@@ -477,12 +478,6 @@ export default function Home() {
             <span className={`text-[10px] sm:text-xs font-medium ${credits <= 2 ? "text-red-500" : credits <= 5 ? "text-orange-500" : "text-text-muted"}`}>
               {credits}积分
             </span>
-            {historyEntries.length > 0 && (
-              <button onClick={() => setShowHistory(!showHistory)}
-                className={`text-[10px] sm:text-xs font-medium px-1.5 sm:px-2 py-1 rounded transition-colors whitespace-nowrap ${showHistory ? "bg-brand/10 text-brand" : "text-text-muted hover:text-brand"}`}>
-                📋{historyEntries.length}
-              </button>
-            )}
             {generatedHtml && (
               <button onClick={handleReset} className="text-sm text-text-muted hover:text-brand">新建</button>
             )}
@@ -490,124 +485,110 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-3 sm:px-4 py-6 sm:py-8 space-y-6 sm:space-y-8">
+      <div className="max-w-2xl lg:max-w-5xl mx-auto px-3 sm:px-4 py-6 sm:py-8 space-y-6 sm:space-y-8">
         {/* ===== 结果预览 ===== */}
         {generatedHtml ? (
           <div className="space-y-4">
-            {/* 变体标签栏 */}
-            {variants.length > 0 && (
-              <div className="flex gap-1.5 overflow-x-auto pb-1">
-                <button
-                  onClick={() => setActiveVariant(0)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                    activeVariant === 0
-                      ? "bg-brand text-white"
-                      : "bg-gray-100 text-text-muted hover:bg-gray-200"
-                  }`}
-                >
-                  我的选择
-                </button>
-                {variants.map((v, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setActiveVariant(i + 1)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                      activeVariant === i + 1
-                        ? "bg-brand text-white"
-                        : "bg-gray-100 text-text-muted hover:bg-gray-200"
-                    }`}
-                  >
-                    {v.name}
+            {/* 变体标签栏 + 标题 */}
+            <div className="space-y-3">
+              {variants.length > 0 && (
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  <button onClick={() => setActiveVariant(0)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${activeVariant === 0 ? "bg-brand text-white" : "bg-gray-100 text-text-muted hover:bg-gray-200"}`}>
+                    我的选择
                   </button>
-                ))}
-              </div>
-            )}
-
-            {/* 标题栏 */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base sm:text-lg font-semibold">
-                  A+ 详情预览
-                  {variants.length > 0 && (
-                    <span className="text-xs text-text-muted font-normal ml-2">
-                      {activeVariant === 0 ? "我的选择" : variants[activeVariant - 1]?.name}
-                    </span>
-                  )}
-                </h2>
-                <p className="text-text-muted text-xs sm:text-sm">
-                  {Math.round((activeVariant === 0 ? generatedHtml : variants[activeVariant - 1]?.html || "").length / 1024)}KB · {images.length} 张图
-                </p>
-              </div>
-              <div className="flex gap-1.5 sm:gap-2">
-                {/* 打分 */}
-                <div className="flex items-center gap-0.5 sm:gap-1 mr-0.5 sm:mr-1">
-                  <button onClick={() => handleRate("liked")}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all ${
-                      rating === "liked" ? "bg-green-100 text-green-600 scale-110" : "bg-gray-50 text-gray-400 hover:bg-green-50 hover:text-green-500"
-                    }`} title="喜欢这个结果">
-                    👍
-                  </button>
-                  <button onClick={() => handleRate("disliked")}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all ${
-                      rating === "disliked" ? "bg-red-100 text-red-500 scale-110" : "bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                    }`} title="不喜欢这个结果">
-                    👎
-                  </button>
-                </div>
-                <button onClick={handleDownloadHtml} className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
-                  ⬇ {activeVariant === 0 ? "HTML" : "此版本"}
-                </button>
-                {images.length > 0 && (
-                  downloadProgress > 0 ? (
-                    <div className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium flex items-center gap-2">
-                      <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      {downloadProgress}%
-                    </div>
-                  ) : (
-                    <button onClick={handleDownloadAll} className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand-hover transition-colors">⬇ 全部 (.zip)</button>
-                  )
-                )}
-              </div>
-            </div>
-
-            {/* 预览 iframe */}
-            <div className="border border-border rounded-xl overflow-hidden bg-white shadow-sm">
-              <iframe
-                srcDoc={activeVariant === 0 ? generatedHtml : variants[activeVariant - 1]?.html || ""}
-                className="w-full"
-                style={{ height: "70vh", border: "none" }}
-                title="预览"
-                onLoad={(e) => {
-                  try {
-                    const doc = (e.target as HTMLIFrameElement).contentDocument;
-                    if (doc) {
-                      const h = doc.documentElement.scrollHeight;
-                      (e.target as HTMLIFrameElement).style.height = Math.max(h, 400) + "px";
-                    }
-                  } catch {}
-                }}
-              />
-            </div>
-
-            {images.length > 0 && (
-              <div className="space-y-3">
-                <h3 className="text-sm font-medium text-text-muted">生成图片（{images.length} 张，点击下载）</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
-                  {images.map((img) => (
-                    <div key={img.name} onClick={() => handleDownloadImage(img)}
-                      className="group relative aspect-[3/4] rounded-lg overflow-hidden bg-gray-100 border border-border cursor-pointer hover:ring-2 hover:ring-brand/30 transition-all">
-                      <img src={`data:${img.mime};base64,${img.base64}`} alt={img.name} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end">
-                        <div className="w-full p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                          <p className="text-white text-xs truncate">{img.name}</p>
-                          <p className="text-white/70 text-[10px]">{Math.round(img.base64.length * 0.75 / 1024)}KB</p>
-                        </div>
-                      </div>
-                    </div>
+                  {variants.map((v, i) => (
+                    <button key={i} onClick={() => setActiveVariant(i + 1)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${activeVariant === i + 1 ? "bg-brand text-white" : "bg-gray-100 text-text-muted hover:bg-gray-200"}`}>
+                      {v.name}
+                    </button>
                   ))}
                 </div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base sm:text-lg font-semibold">
+                    A+ 详情预览
+                    {variants.length > 0 && (
+                      <span className="text-xs text-text-muted font-normal ml-2">
+                        {activeVariant === 0 ? "我的选择" : variants[activeVariant - 1]?.name}
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-text-muted text-xs sm:text-sm">
+                    {Math.round((activeVariant === 0 ? generatedHtml : variants[activeVariant - 1]?.html || "").length / 1024)}KB · {images.length} 张图
+                  </p>
+                </div>
+                <div className="flex gap-1.5 sm:gap-2">
+                  <div className="flex items-center gap-0.5 sm:gap-1 mr-0.5 sm:mr-1">
+                    <button onClick={() => handleRate("liked")}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all ${rating === "liked" ? "bg-green-100 text-green-600 scale-110" : "bg-gray-50 text-gray-400 hover:bg-green-50 hover:text-green-500"}`}>
+                      👍
+                    </button>
+                    <button onClick={() => handleRate("disliked")}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all ${rating === "disliked" ? "bg-red-100 text-red-500 scale-110" : "bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500"}`}>
+                      👎
+                    </button>
+                  </div>
+                  <button onClick={handleDownloadHtml} className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
+                    ⬇ {activeVariant === 0 ? "HTML" : "此版本"}
+                  </button>
+                  {images.length > 0 && (
+                    downloadProgress > 0 ? (
+                      <div className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium flex items-center gap-2">
+                        <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        {downloadProgress}%
+                      </div>
+                    ) : (
+                      <button onClick={handleDownloadAll} className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand-hover transition-colors">⬇ 全部 (.zip)</button>
+                    )
+                  )}
+                </div>
               </div>
-            )}
+            </div>
+
+            {/* 两栏：预览 | 图片 */}
+            <div className="grid lg:grid-cols-5 gap-4 items-start">
+              <div className="lg:col-span-3 space-y-4">
+                <div className="border border-border rounded-xl overflow-hidden bg-white shadow-sm">
+                  <iframe
+                    srcDoc={activeVariant === 0 ? generatedHtml : variants[activeVariant - 1]?.html || ""}
+                    className="w-full"
+                    style={{ height: "70vh", border: "none" }}
+                    title="预览"
+                    onLoad={(e) => {
+                      try {
+                        const doc = (e.target as HTMLIFrameElement).contentDocument;
+                        if (doc) {
+                          const h = doc.documentElement.scrollHeight;
+                          (e.target as HTMLIFrameElement).style.height = Math.max(h, 400) + "px";
+                        }
+                      } catch {}
+                    }}
+                  />
+                </div>
+              </div>
+              {images.length > 0 && (
+                <div className="lg:col-span-2">
+                  <h3 className="text-sm font-medium text-text-muted mb-3">生成图片（{images.length} 张，点击下载）</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {images.map((img) => (
+                      <div key={img.name} onClick={() => handleDownloadImage(img)}
+                        className="group relative aspect-[3/4] rounded-lg overflow-hidden bg-gray-100 border border-border cursor-pointer hover:ring-2 hover:ring-brand/30 transition-all">
+                        <img src={`data:${img.mime};base64,${img.base64}`} alt={img.name} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end">
+                          <div className="w-full p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                            <p className="text-white text-xs truncate">{img.name}</p>
+                            <p className="text-white/70 text-[10px]">{Math.round(img.base64.length * 0.75 / 1024)}KB</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         ) : generating ? (
           <div className="space-y-6">
@@ -778,9 +759,22 @@ export default function Home() {
           </>
         )}
 
+        {/* ===== 历史按钮（显眼位置）===== */}
+        {historyEntries.length > 0 && (
+          <button
+            onClick={() => {
+              setShowHistory(!showHistory);
+              if (!showHistory) setTimeout(() => historyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+            }}
+            className="w-full py-3 border-2 border-dashed border-border rounded-xl text-text-muted hover:text-brand hover:border-brand/30 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+          >
+            📋 历史记录（{historyEntries.length}）
+          </button>
+        )}
+
         {/* ===== 历史记录面板 ===== */}
         {showHistory && historyEntries.length > 0 && (
-          <div className="border-t border-border pt-6 mt-6">
+          <div ref={historyRef} className="border-t border-border pt-6 mt-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base sm:text-lg font-semibold">历史记录</h2>
               <button onClick={() => setShowHistory(false)} className="text-xs text-text-muted hover:text-brand">关闭</button>

@@ -20,11 +20,11 @@ export interface HistoryImage {
 
 const DB_NAME = "aplus-builder";
 const STORE_NAME = "history";
-const MAX_ENTRIES = 5;
+const RETENTION_DAYS = 30;
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    const req = indexedDB.open(DB_NAME, 3);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -90,14 +90,14 @@ export async function saveToHistory(entry: {
     const store = tx.objectStore(STORE_NAME);
     store.add(record);
 
-    // prune to MAX_ENTRIES
-    const keysReq = store.getAllKeys();
-    keysReq.onsuccess = () => {
-      const keys = keysReq.result as string[];
-      if (keys.length > MAX_ENTRIES) {
-        keys.sort();
-        for (let i = 0; i < keys.length - MAX_ENTRIES; i++) {
-          store.delete(keys[i]);
+    // prune: 删除超过 RETENTION_DAYS 天的记录
+    const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const allReq = store.getAll();
+    allReq.onsuccess = () => {
+      const all = allReq.result as HistoryEntry[];
+      for (const entry of all) {
+        if (entry.timestamp < cutoff) {
+          store.delete(entry.id);
         }
       }
     };
