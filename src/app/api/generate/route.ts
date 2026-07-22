@@ -150,6 +150,7 @@ export async function POST(request: NextRequest) {
       `- 主输出（用户选的风格）：${outputDir}/index.html`,
       ...variantStyles.map((s, i) => `- 变体 ${i + 1}（${s}）：${outputDir}/variant_${i + 1}.html`),
       `- 所有变体 HTML 都必须包含相同的一套图片，只改变排版/字体/颜色/布局。`,
+      `- 每个变体的风格必须适合该产品的品类和调性，不要选与产品气质冲突的模板或配色。`,
       `- 文件名必须严格使用 index.html、variant_1.html、variant_2.html。`,
     ].join("\n");
 
