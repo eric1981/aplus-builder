@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>导出历史</title></head><body>
+<pre id="status">正在读取 IndexedDB...</pre>
+<script>
+(async () => {
+  const status = document.getElementById("status");
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const r = indexedDB.open("aplus-builder", 3);
+      r.onerror = () => reject(r.error);
+      r.onsuccess = () => resolve(r.result);
+    });
+    const tx = db.transaction("history", "readonly");
+    const store = tx.objectStore("history");
+    const entries = await new Promise((resolve, reject) => {
+      const r = store.getAll();
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+
+    status.textContent = `找到 ${entries.length} 条记录，正在准备上传（含图片）...`;
+
+    // 每条记录包含 HTML + 全量图片 base64 + 变体
+    const data = entries.map(e => ({
+      id: e.id,
+      title: e.title || "(无标题)",
+      created: e.createdAt ? new Date(e.createdAt).toISOString() : "unknown",
+      htmlSize: e.html?.length || 0,
+      images: (e.images || []).map(i => ({ name: i.name, base64: i.base64, mime: i.mime })),
+      variants: (e.variants || []).map(v => ({ name: v.name, html: v.html })),
+      html: e.html || "",
+    }));
+
+    const totalSize = JSON.stringify(data).length;
+    status.textContent += `\n总大小: ${(totalSize/1024/1024).toFixed(1)} MB，正在发送...`;
+
+    const resp = await fetch("/api/save-history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const result = await resp.json();
+    status.textContent = result.ok
+      ? `✅ 已保存 ${result.count} 条记录到 ~/Downloads/aplus-builder/\n含 HTML + ${result.totalImages} 张图片 + 变体`
+      : `❌ 失败: ${result.error}`;
+  } catch(e) {
+    status.textContent = "❌ 错误: " + e.message;
+  }
+})();
+</script></body></html>

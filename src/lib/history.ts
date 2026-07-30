@@ -1,136 +1,56 @@
-// IndexedDB-based generation history — stores last 5 results with full HTML + images
-// localStorage can't fit 18MB HTML, so we use IndexedDB for heavy payloads.
+// Filesystem-based generation history — reads from ~/Downloads/aplus-builder/
+// Replaces the old IndexedDB-based approach. History now mirrors what's on disk.
 
 export interface HistoryEntry {
-  id: string;
+  dirName: string;
   timestamp: number;
-  description: string;
   imageCount: number;
+  variantNames: string[];
+}
+
+export interface LoadedOutput {
   html: string;
-  images: HistoryImage[];
-  thumbnail: string;
-  htmlSize: number;
-}
-
-export interface HistoryImage {
-  name: string;
-  base64: string;
-  mime: string;
-}
-
-const DB_NAME = "aplus-builder";
-const STORE_NAME = "history";
-const RETENTION_DAYS = 30;
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 3);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/** Resize first image to a small thumbnail for the history list */
-function createThumbnail(base64: string, mime: string): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const maxW = 200;
-      const maxH = 200;
-      let w = img.width;
-      let h = img.height;
-      if (w > h) {
-        h = (h * maxW) / w;
-        w = maxW;
-      } else {
-        w = (w * maxH) / h;
-        h = maxH;
-      }
-      canvas.width = Math.round(w);
-      canvas.height = Math.round(h);
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", 0.6));
-    };
-    img.onerror = () => resolve("");
-    img.src = `data:${mime};base64,${base64}`;
-  });
-}
-
-export async function saveToHistory(entry: {
-  description: string;
-  html: string;
-  images: HistoryImage[];
-}): Promise<void> {
-  const db = await openDB();
-
-  let thumbnail = "";
-  if (entry.images.length > 0) {
-    thumbnail = await createThumbnail(entry.images[0].base64, entry.images[0].mime);
-  }
-
-  const record: HistoryEntry = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    timestamp: Date.now(),
-    thumbnail,
-    imageCount: entry.images.length,
-    htmlSize: entry.html.length,
-    ...entry,
-  };
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    store.add(record);
-
-    // prune: 删除超过 RETENTION_DAYS 天的记录
-    const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    const allReq = store.getAll();
-    allReq.onsuccess = () => {
-      const all = allReq.result as HistoryEntry[];
-      for (const entry of all) {
-        if (entry.timestamp < cutoff) {
-          store.delete(entry.id);
-        }
-      }
-    };
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  images: { name: string; base64: string; mime: string }[];
+  variants: { name: string; html: string }[];
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.getAll();
-    req.onsuccess = () => {
-      resolve(
-        (req.result as HistoryEntry[]).sort(
-          (a, b) => b.timestamp - a.timestamp,
-        ),
-      );
-    };
-    req.onerror = () => reject(req.error);
-  });
+  try {
+    const res = await fetch("/api/list-history");
+    const data = await res.json();
+    return data.entries || [];
+  } catch {
+    return [];
+  }
 }
 
-export async function deleteFromHistory(id: string): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    store.delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+export async function loadOutput(dirName: string): Promise<LoadedOutput | null> {
+  try {
+    const res = await fetch(
+      `/api/load-output?dir=${encodeURIComponent(dirName)}`,
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// Rewrite relative image paths in HTML to use the output API endpoint,
+// so images can be displayed in the iframe preview.
+export function rewriteImagePaths(html: string, dirName: string): string {
+  return html.replace(
+    /(src|href)=["']\.\/([^"']+)["']/g,
+    (_m, attr, file) =>
+      `${attr}="/api/output/${encodeURIComponent(dirName)}/${file}"`,
+  );
+}
+
+// Stubs for backward compatibility
+export async function saveToHistory(_entry: unknown): Promise<void> {
+  // No-op: output is already on disk
+}
+
+export async function deleteFromHistory(_id: string): Promise<void> {
+  // No-op: deletion from disk is handled elsewhere
 }

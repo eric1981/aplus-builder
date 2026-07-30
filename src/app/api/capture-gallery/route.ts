@@ -1,0 +1,45 @@
+import { NextRequest, NextResponse } from "next/server";
+import { spawnSync } from "child_process";
+import { writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+
+const GALLERY_DIR = join(process.cwd(), "public", "gallery");
+const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+export async function POST(request: NextRequest) {
+  try {
+    const { html, name } = await request.json() as { html: string; name: string };
+
+    if (!html || !name) {
+      return NextResponse.json({ error: "Missing html or name" }, { status: 400 });
+    }
+
+    mkdirSync(GALLERY_DIR, { recursive: true });
+
+    // Write HTML to temp file
+    const tmpHtml = join(GALLERY_DIR, `${name}.html`);
+    writeFileSync(tmpHtml, html, "utf-8");
+
+    // Screenshot with Chrome headless
+    const destPath = join(GALLERY_DIR, `${name}.png`);
+    const result = spawnSync(CHROME, [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-sandbox",
+      `--screenshot=${destPath}`,
+      "--window-size=450,800",
+      `file://${tmpHtml}`,
+    ], { timeout: 15000 });
+
+    if (result.error) {
+      return NextResponse.json({ error: result.error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, path: `/gallery/${name}.png` });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";

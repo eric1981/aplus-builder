@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
-import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, appendFileSync, readdirSync } from "fs";
+import { spawn, spawnSync } from "child_process";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync } from "fs";
 import { join, extname } from "path";
 import { randomUUID } from "crypto";
+import { taskStore, type PersistedTask } from "./task-store";
+
+const OUTPUT_BASE = join("/Users", "eric", "Downloads", "aplus-builder");
+
+function sanitizeProductName(description: string, taskId: string): string {
+  if (!description.trim()) return `未命名产品-${taskId.slice(0, 8)}`;
+  // 取前 40 个字符，只保留中英文、数字、空格，替换其余为连字符
+  const cleaned = description.trim().slice(0, 40)
+    .replace(/[^a-zA-Z0-9\u4e00-\u9fff\s]/g, "-")
+    .replace(/\s+/g, "-").replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return cleaned || `未命名产品-${taskId.slice(0, 8)}`;
+}
 
 type TaskImage = { name: string; base64: string; mime: string };
 type Task = {
@@ -17,7 +30,7 @@ type Task = {
 };
 
 const tasks = new Map<string, Task>();
-const AGENT_TIMEOUT = 15 * 60 * 1000; // 15 分钟
+const AGENT_TIMEOUT = 20 * 60 * 1000;
 const MAX_CONCURRENT = 2;
 
 let activeCount = 0;
@@ -26,7 +39,7 @@ const queue: { taskId: string; startFn: () => void }[] = [];
 function updateQueuePositions() {
   for (const { taskId } of queue) {
     const t = tasks.get(taskId);
-    if (t) t.queuePosition = 1; // 简化：排队中的都是第 1 位
+    if (t) t.queuePosition = 1;
   }
 }
 
@@ -47,51 +60,169 @@ function releaseSlot() {
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
 
-export async function POST(request: NextRequest) {
-  const taskId = randomUUID();
-  const workDir = join("/tmp", "ecommerce", taskId);
-  const inputDir = join(workDir, "input");
-  const outputDir = join(workDir, "output");
+// ===== Agent 启动（被 POST 和 recovery 共用）=====
+
+function spawnAgent(taskId: string, workDir: string) {
+  const outputDir = workDir;
   const indexHtml = join(outputDir, "index.html");
   const manifestPath = join(outputDir, "image-manifest.json");
-  const promptFile = join(workDir, "prompt.txt");
   const logFile = join(workDir, "agent.log");
+  const scriptPath = join(workDir, "run.sh");
+
+  if (!existsSync(scriptPath)) {
+    tasks.set(taskId, { status: "error", error: "恢复失败：缺少 run.sh", log: "" });
+    taskStore.remove(taskId);
+    releaseSlot();
+    return;
+  }
+
+  tasks.set(taskId, { status: "running", log: "" });
+
+  const child = spawn("/bin/bash", [scriptPath], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOME: "/Users/eric" },
+    cwd: "/Users/eric",
+  });
+
+  let logBuffer = "";
+  let settled = false;
+
+  const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string, variants?: { name: string; html: string }[]) => {
+    if (settled) return;
+    settled = true;
+    tasks.set(taskId, { status, html, images, variants, preference_signal: signal, error: errMsg, log: logBuffer.slice(-5000) });
+    taskStore.remove(taskId);
+    releaseSlot();
+  };
+
+  const readAndEmbed = (filePath: string): string | null => {
+    if (!existsSync(filePath)) return null;
+    try {
+      const raw = readFileSync(filePath, "utf-8");
+      let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
+      const endIdx = html.lastIndexOf("</html>");
+      if (endIdx !== -1) html = html.substring(0, endIdx + 7);
+      return embedImages(html, outputDir);
+    } catch {
+      return null;
+    }
+  };
+
+  const collectAndFinish = () => {
+    if (!existsSync(indexHtml)) return false;
+    try {
+      const images = collectImages(outputDir);
+      const signal = extractPreferenceSignal(manifestPath);
+      const html = readAndEmbed(indexHtml);
+      if (!html) throw new Error("Failed to read index.html");
+
+      const variants: { name: string; html: string }[] = [];
+      const STYLE_NAMES = ["Swiss 瑞士风", "Product Launch 暗底Hero风", "Editorial 暖杂志风"];
+      for (let i = 1; i <= 3; i++) {
+        const vPath = join(outputDir, `variant_${i}.html`);
+        const vHtml = readAndEmbed(vPath);
+        if (vHtml) variants.push({ name: STYLE_NAMES[i - 1] || `变体 ${i}`, html: vHtml });
+      }
+
+      finalize("done", html, undefined, images, signal, variants.length > 0 ? variants : undefined);
+      console.log(`[hermes-cli] ✅ HTML ${html.length} chars, ${images.length} images, ${variants.length} variants`);
+
+      captureGalleryScreenshots(outputDir);
+      return true;
+    } catch (e: any) {
+      finalize("error", undefined, e.message);
+      return false;
+    }
+  };
+
+  const timer = setTimeout(() => {
+    child.kill("SIGTERM");
+    if (!collectAndFinish()) finalize("error", undefined, "Agent 超时");
+  }, AGENT_TIMEOUT);
+
+  child.stdout.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
+  child.stderr.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
+
+  child.on("close", (code) => {
+    clearTimeout(timer);
+    console.log(`[hermes-cli] Task ${taskId} exited code=${code}`);
+    if (collectAndFinish()) return;
+    const htmlMatch = logBuffer.match(/```html?\s*\n?([\s\S]*?)```/);
+    if (htmlMatch) { finalize("done", htmlMatch[1].trim()); }
+    else { finalize("error", undefined, `Agent 退出码 ${code}`); }
+  });
+
+  child.on("error", (err) => { clearTimeout(timer); finalize("error", undefined, err.message); });
+}
+
+// ===== POST：创建任务 =====
+
+export async function POST(request: NextRequest) {
+  const taskId = randomUUID();
 
   try {
     const formData = await request.formData();
 
     let imgPath = "";
-    for (const [key, value] of formData.entries()) {
-      if (key.startsWith("image_") && value instanceof Blob) {
-        mkdirSync(inputDir, { recursive: true });
-        mkdirSync(outputDir, { recursive: true });
-        const buffer = Buffer.from(await value.arrayBuffer());
-        const ext = value.type === "image/png" ? "png" : "jpg";
-        imgPath = join(inputDir, `product.${ext}`);
-        writeFileSync(imgPath, buffer);
-        break;
-      }
+    let modelRefPath = "";
+    let logoPath = "";
+
+    // 先取 description 和 product_name 用于目录命名
+    const description = (formData.get("description") as string) || "";
+    const productNameInput = (formData.get("product_name") as string) || "";
+
+    const productDir = sanitizeProductName(productNameInput || description, taskId);
+    const workDir = join(OUTPUT_BASE, productDir);
+    const inputDir = join(workDir, "input");
+    const outputDir = workDir;
+    const promptFile = join(workDir, "prompt.txt");
+
+    mkdirSync(inputDir, { recursive: true });
+    mkdirSync(outputDir, { recursive: true });
+
+    // 逐项提取文件（不用 entries() 遍历，避免 Blob instanceof 不可靠）
+    const modelImage = formData.get("model_image_0");
+    if (modelImage && typeof modelImage === "object" && "arrayBuffer" in modelImage) {
+      const blob = modelImage as Blob;
+      const buffer = Buffer.from(await blob.arrayBuffer());
+      const ext = blob.type === "image/png" ? "png" : "jpg";
+      modelRefPath = join(inputDir, `model_ref.${ext}`);
+      writeFileSync(modelRefPath, buffer);
+    }
+
+    const logoImage = formData.get("logo_image_0");
+    if (logoImage && typeof logoImage === "object" && "arrayBuffer" in logoImage) {
+      const blob = logoImage as Blob;
+      const buffer = Buffer.from(await blob.arrayBuffer());
+      const ext = blob.type === "image/png" ? "png" : "jpg";
+      logoPath = join(outputDir, `logo.${ext}`);
+      writeFileSync(logoPath, buffer);
+    }
+
+    const productImage = formData.get("image_0");
+    if (productImage && typeof productImage === "object" && "arrayBuffer" in productImage) {
+      const blob = productImage as Blob;
+      const buffer = Buffer.from(await blob.arrayBuffer());
+      const ext = blob.type === "image/png" ? "png" : "jpg";
+      imgPath = join(inputDir, `product.${ext}`);
+      writeFileSync(imgPath, buffer);
     }
 
     if (!imgPath) {
       return NextResponse.json({ error: "请上传产品图片" }, { status: 400 });
     }
 
-    const description = (formData.get("description") as string) || "";
     const profileContext = (formData.get("profile_context") as string) || "";
 
-    // 解析用户 UI 显式偏好
     let uiPrefs: { style?: string; odStyle?: string; model?: string } = {};
     try {
       const raw = formData.get("preferences") as string;
       if (raw) uiPrefs = JSON.parse(raw);
     } catch {}
 
-    // ---- prompt 组装：三级优先级 ----
-
+    // ---- prompt 组装 ----
     const prefLines: string[] = [];
 
-    // 1. 显式选择（指令语气）
     if (uiPrefs.odStyle) {
       prefLines.push(`- 排版风格：使用 Open Design 模板 "${uiPrefs.odStyle}"（用户指定，必须使用）`);
     } else if (uiPrefs.style && uiPrefs.style !== "auto") {
@@ -103,7 +234,6 @@ export async function POST(request: NextRequest) {
       prefLines.push(`- 排版风格：${styleLabel[uiPrefs.style] || uiPrefs.style}（用户指定，必须使用）`);
     }
 
-    // ---- 多版本变体 ----
     const styleLabel: Record<string, string> = {
       "editorial": "Editorial 暖杂志风", "swiss": "Swiss 瑞士风",
       "product-launch": "Product Launch 暗底Hero风", "xhs-pastel": "小红书 Pastel 马卡龙风",
@@ -116,18 +246,16 @@ export async function POST(request: NextRequest) {
       const selected = styleLabel[uiPrefs.style] || "";
       return ALL_STYLES.filter((s) => !s.startsWith(selected.slice(0, 4))).slice(0, 2);
     })();
+
     if (uiPrefs.model && uiPrefs.model !== "auto") {
       const modelLabel: Record<string, string> = { "east-asian": "东亚", "european": "欧美", "middle-eastern": "中东/混血" };
       prefLines.push(`- 模特：${modelLabel[uiPrefs.model] || uiPrefs.model}（用户指定，必须使用）`);
     }
 
-    // 2. 画像推断（参考语气）
     if (profileContext) {
       prefLines.push(`\n【用户偏好画像 — 基于历史生成记录，作为参考而非强制】`);
       prefLines.push(profileContext);
     }
-
-    // 3. 啥也没有 → skill 自决
 
     const descBlock = description.trim()
       ? `\n产品信息：${description}\n`
@@ -137,11 +265,13 @@ export async function POST(request: NextRequest) {
       `帮我生成这个产品的电商详情页。`,
       ``,
       `产品图：${imgPath}`,
+      ...(modelRefPath ? [`模特参考图：${modelRefPath}`] : []),
+      ...(logoPath ? [`品牌 Logo：${logoPath}（请将 Logo 嵌入详情页顶部品牌区或底部页脚，使用 <img src="./logo.png"> 引用，保持原始比例不拉伸变形）`] : []),
       descBlock,
       ...(prefLines.length > 0 ? [`偏好参考：`, ...prefLines, ``] : []),
       `【重要规则】`,
       `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
-      `- 把最终产出物（index.html、图片、manifest）全部放到 ${outputDir}/ 下面，不要放到 Downloads。`,
+      `- 把最终产出物（index.html、图片、manifest）全部放到 ${outputDir}/ 下面。`,
       `- HTML 里的图片使用相对路径（如 ./scene_01.png）。`,
       `- 生成完成后直接写入 index.html，不要无限迭代优化。`,
       `- 在 image-manifest.json 中记录每张图使用的 prompt。`,
@@ -162,106 +292,32 @@ export async function POST(request: NextRequest) {
       `cd /Users/eric`,
       `hermes -p duma -s ecommerce-aplus-detail chat \\`,
       `  -q "$(cat '${promptFile}')" \\`,
-      `  --quiet --yolo --max-turns 60 --source web`,
+      `  --quiet --yolo --max-turns 90 --source web`,
     ].join("\n");
     const scriptPath = join(workDir, "run.sh");
     writeFileSync(scriptPath, script, { mode: 0o755 });
 
-    // ===== 启动 agent（带队列）=====
-
-    const startAgent = () => {
-      tasks.set(taskId, { status: "running", log: "" });
-
-      const child = spawn("/bin/bash", [scriptPath], {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, HOME: "/Users/eric" },
-        cwd: "/Users/eric",
-      });
-
-      let logBuffer = "";
-      let settled = false;
-
-      const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string, variants?: { name: string; html: string }[]) => {
-        if (settled) return;
-        settled = true;
-        tasks.set(taskId, { status, html, images, variants, preference_signal: signal, error: errMsg, log: logBuffer.slice(-5000) });
-        releaseSlot();
-      };
-
-      const readAndEmbed = (filePath: string): string | null => {
-        if (!existsSync(filePath)) return null;
-        try {
-          const raw = readFileSync(filePath, "utf-8");
-          let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
-          const endIdx = html.lastIndexOf("</html>");
-          if (endIdx !== -1) html = html.substring(0, endIdx + 7);
-          return embedImages(html, outputDir);
-        } catch {
-          return null;
-        }
-      };
-
-      const collectAndFinish = () => {
-        if (!existsSync(indexHtml)) return false;
-        try {
-          const images = collectImages(outputDir);
-          const signal = extractPreferenceSignal(manifestPath);
-          const html = readAndEmbed(indexHtml);
-          if (!html) throw new Error("Failed to read index.html");
-
-          // 收集变体
-          const variants: { name: string; html: string }[] = [];
-          const variantNames = ["Swiss 瑞士风", "Product Launch 暗底Hero风", "Editorial 暖杂志风"];
-          for (let i = 1; i <= variantStyles.length; i++) {
-            const vPath = join(outputDir, `variant_${i}.html`);
-            const vHtml = readAndEmbed(vPath);
-            if (vHtml) variants.push({ name: variantStyles[i - 1] || `变体 ${i}`, html: vHtml });
-          }
-
-          finalize("done", html, undefined, images, signal, variants.length > 0 ? variants : undefined);
-          console.log(`[hermes-cli] ✅ HTML ${html.length} chars, ${images.length} images, ${variants.length} variants`);
-          return true;
-        } catch (e: any) {
-          finalize("error", undefined, e.message);
-          return false;
-        }
-      };
-
-      const timer = setTimeout(() => {
-        child.kill("SIGTERM");
-        if (!collectAndFinish()) finalize("error", undefined, "Agent 超时");
-        safeCleanup(workDir);
-      }, AGENT_TIMEOUT);
-
-      child.stdout.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
-      child.stderr.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
-
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        console.log(`[hermes-cli] Task ${taskId} exited code=${code}`);
-        if (collectAndFinish()) { safeCleanup(workDir); return; }
-        const htmlMatch = logBuffer.match(/```html?\s*\n?([\s\S]*?)```/);
-        if (htmlMatch) { finalize("done", htmlMatch[1].trim()); }
-        else { finalize("error", undefined, `Agent 退出码 ${code}`); }
-        safeCleanup(workDir);
-      });
-
-      child.on("error", (err) => { clearTimeout(timer); finalize("error", undefined, err.message); safeCleanup(workDir); });
-    };
+    // 持久化任务元数据
+    taskStore.add({
+      taskId,
+      userId: "anonymous",
+      status: activeCount >= MAX_CONCURRENT ? "queued" : "running",
+      workDir,
+      createdAt: Date.now(),
+    });
 
     // 检查并发
     if (activeCount >= MAX_CONCURRENT) {
       tasks.set(taskId, { status: "queued", queuePosition: 1, log: "" });
-      queue.push({ taskId, startFn: startAgent });
+      queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir) });
       updateQueuePositions();
       return NextResponse.json({ taskId, queued: true, queuePosition: 1 });
     }
 
     activeCount++;
-    startAgent();
+    spawnAgent(taskId, workDir);
     return NextResponse.json({ taskId });
   } catch (error: any) {
-    rmSync(workDir, { recursive: true, force: true });
     return NextResponse.json({ error: error.message || "启动失败" }, { status: 500 });
   }
 }
@@ -280,6 +336,38 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(task);
 }
 
+// ===== 启动时恢复中断任务 =====
+
+(function recoverTasks() {
+  const pending = taskStore.getRecoverable();
+  for (const t of pending) {
+    if (!existsSync(join(t.workDir, "run.sh"))) {
+      tasks.set(t.taskId, { status: "error", error: "任务数据已丢失", log: "" });
+      taskStore.remove(t.taskId);
+      continue;
+    }
+
+    tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", log: "" });
+
+    if (t.status === "queued") {
+      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir) });
+      continue;
+    }
+
+    if (activeCount < MAX_CONCURRENT) {
+      activeCount++;
+      spawnAgent(t.taskId, t.workDir);
+    } else {
+      tasks.set(t.taskId, { status: "queued", queuePosition: 1, log: "" });
+      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir) });
+    }
+  }
+  updateQueuePositions();
+  if (pending.length > 0) {
+    console.log(`[hermes-cli] 🔄 恢复了 ${pending.length} 个中断任务`);
+  }
+})();
+
 // ===== 偏好信号提取 =====
 
 function extractPreferenceSignal(manifestPath: string): string | undefined {
@@ -291,7 +379,6 @@ function extractPreferenceSignal(manifestPath: string): string | undefined {
     const entries = Array.isArray(manifest) ? manifest : manifest.images || manifest.entries || [];
     if (!entries.length) return undefined;
 
-    // 从 prompt 中提取风格、模特、场景关键词
     const keywords = { style: new Set<string>(), model: new Set<string>(), scene: new Set<string>() };
 
     const stylePatterns: [RegExp, string][] = [
@@ -352,24 +439,61 @@ function collectImages(dir: string): TaskImage[] {
 }
 
 function embedImages(html: string, baseDir: string): string {
-  return html.replace(/src="([^"]+)"/g, (match, src: string) => {
+  let embedOk = 0;
+  let embedMiss = 0;
+  const result = html.replace(/src="([^"]+)"/g, (match, src: string) => {
     if (src.startsWith("http") || src.startsWith("data:")) return match;
     let imgPath: string;
     if (src.startsWith("./")) imgPath = join(baseDir, src.slice(2));
     else if (src.startsWith("../")) imgPath = join(baseDir, "..", src.slice(3));
     else imgPath = join(baseDir, src);
-    if (!existsSync(imgPath)) return match;
+    if (!existsSync(imgPath)) {
+      embedMiss++;
+      console.warn(`[embedImages] MISS: ${src} → ${imgPath} (not found)`);
+      return match;
+    }
     try {
       const data = readFileSync(imgPath);
       const ext = imgPath.split(".").pop()?.toLowerCase() || "jpg";
       const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+      embedOk++;
       return `src="data:${mime};base64,${data.toString("base64")}"`;
-    } catch { return match; }
+    } catch (e) {
+      embedMiss++;
+      console.warn(`[embedImages] ERROR: ${src} → ${imgPath}`, e);
+      return match;
+    }
   });
+  if (embedMiss > 0) console.warn(`[embedImages] ${embedOk} embedded, ${embedMiss} MISSING`);
+  return result;
 }
 
-function safeCleanup(workDir: string) {
-  try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+// ===== 画廊截图 =====
+
+const GALLERY_DIR = join(process.cwd(), "public", "gallery");
+const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+function captureGalleryScreenshots(outputDir: string) {
+  try {
+    mkdirSync(GALLERY_DIR, { recursive: true });
+    const htmlFiles = [
+      { src: "index.html", dest: "editorial.png" },
+      { src: "variant_1.html", dest: "swiss.png" },
+      { src: "variant_2.html", dest: "product-launch.png" },
+    ];
+    for (const { src, dest } of htmlFiles) {
+      const htmlPath = join(outputDir, src);
+      if (!existsSync(htmlPath)) continue;
+      const destPath = join(GALLERY_DIR, dest);
+      try {
+        spawnSync(CHROME, [
+          "--headless=new", "--disable-gpu", "--no-sandbox",
+          `--screenshot=${destPath}`, "--window-size=450,800",
+          `file://${htmlPath}`,
+        ], { timeout: 15000 });
+      } catch {}
+    }
+  } catch {}
 }
 
 export const runtime = "nodejs";
