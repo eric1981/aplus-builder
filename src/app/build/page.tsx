@@ -457,15 +457,25 @@ export default function BuildPage() {
                   ))}
                 </div>
                 <details className="mt-3">
-                  <summary className="text-xs text-text-muted cursor-pointer hover:text-brand py-1">+ 更多 Open Design 风格</summary>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {OD_STYLES.map((od) => (
-                      <button key={od.value}
-                        onClick={() => setPrefs({ ...prefs, odStyle: prefs.odStyle === od.value ? "" : od.value, style: prefs.odStyle === od.value ? prefs.style : "auto" })}
-                        className={`px-2.5 py-1 rounded-md text-[11px] transition-all ${
-                          prefs.odStyle === od.value ? "bg-brand text-white font-medium" : "bg-white border border-border text-text-muted hover:border-brand/30 hover:text-text"
-                        }`}>{od.label}</button>
-                    ))}
+                  <summary className="text-xs text-text-muted cursor-pointer hover:text-brand py-1">+ 更多 Open Design 风格（29 种）</summary>
+                  <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
+                    {(() => {
+                      const cats = [...new Set(OD_STYLES.map(od => od.category))];
+                      return cats.map(cat => (
+                        <div key={cat}>
+                          <p className="text-[10px] text-muted font-medium mb-1">{cat}</p>
+                          <div className="flex flex-wrap gap-1">
+                            {OD_STYLES.filter(od => od.category === cat).map((od) => (
+                              <button key={od.value}
+                                onClick={() => setPrefs({ ...prefs, odStyle: prefs.odStyle === od.value ? "" : od.value, style: prefs.odStyle === od.value ? prefs.style : "auto" })}
+                                className={`px-2 py-0.5 rounded text-[10px] transition-all ${
+                                  prefs.odStyle === od.value ? "bg-accent text-accent-on font-medium" : "bg-surface border border-border text-muted hover:border-accent/30 hover:text-fg"
+                                }`}>{od.label}</button>
+                            ))}
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </details>
               </div>

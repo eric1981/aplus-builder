@@ -240,9 +240,14 @@ export default function CustomersPage() {
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                     <option disabled>── Open Design ──</option>
-                    {OD_STYLES.map((od) => (
-                      <option key={od.value} value={od.value}>{od.label}</option>
-                    ))}
+                    {(() => {
+                      const cats = [...new Set(OD_STYLES.map(od => od.category))];
+                      return cats.flatMap(cat => [
+                        ...OD_STYLES.filter(od => od.category === cat).map(od => (
+                          <option key={od.value} value={od.value}>  {od.label}</option>
+                        ))
+                      ]);
+                    })()}
                   </select>
                 </div>
                 <div>
