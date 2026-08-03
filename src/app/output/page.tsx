@@ -137,19 +137,23 @@ export default function OutputPage() {
     setHydrated(true);
   }, []);
 
-  // -- 为无 html 的 done 项从磁盘加载内容 --
+  // -- 为无 html 的 done/error 项从磁盘加载内容 --
   useEffect(() => {
     if (!hydrated || historyEntries.length === 0) return;
     for (const item of queueItems) {
-      if (item.status !== "done" || item.html) continue;
-      const match = historyEntries.find((e: HistoryEntry) => e.dirName === item.productName);
+      if (item.html) continue;
+      if (item.status !== "done" && item.status !== "error") continue;
+      const tid = item.taskId?.slice(0, 8) || "";
+      const match = historyEntries.find((e: HistoryEntry) =>
+        e.dirName === item.productName || (tid && e.dirName.includes(tid))
+      );
       if (!match) continue;
       loadOutput(match.dirName).then((data) => {
         if (!data?.html) return;
         setQueueItems((prev) =>
           prev.map((p) =>
             p.id === item.id
-              ? { ...p, html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })) }
+              ? { ...p, status: "done", html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })) }
               : p
           )
         );
@@ -214,8 +218,9 @@ export default function OutputPage() {
             } else {
               // 任务可能已完成但服务重启丢失了内存状态，检查磁盘
               const entries = await getHistory();
+              const tid8 = qi.taskId?.slice(0, 8) || "";
               const match = entries.find((e: HistoryEntry) =>
-                e.dirName === qi.productName || e.dirName.includes(qi.id.slice(-8))
+                e.dirName === qi.productName || (tid8 && e.dirName.includes(tid8))
               );
               if (match) {
                 setHistoryEntries(entries);
