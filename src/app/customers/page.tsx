@@ -29,6 +29,12 @@ export default function CustomersPage() {
   const [editSizeChart, setEditSizeChart] = useState("");
   const [editRequirements, setEditRequirements] = useState("");
   const [editTemplateId, setEditTemplateId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // 资产 data URL（从 API 加载）
+  const [logoUrl, setLogoUrl] = useState("");
+  const [modelUrl, setModelUrl] = useState("");
 
   const logoRef = useRef<HTMLInputElement>(null);
   const modelRefRef = useRef<HTMLInputElement>(null);
@@ -46,10 +52,23 @@ export default function CustomersPage() {
     setEditSizeChart(c.sizeChartCsv || "");
     setEditRequirements(c.requirements || "");
     setEditTemplateId(c.customTemplateId || "");
+    setLogoUrl("");
+    setModelUrl("");
+    // 加载资产
+    if (c.logo) {
+      fetch(`/api/customers/assets?id=${c.id}&type=logo`)
+        .then(r => r.json()).then(d => { if (d.dataUrl) setLogoUrl(d.dataUrl); }).catch(() => {});
+    }
+    if (c.modelRef) {
+      fetch(`/api/customers/assets?id=${c.id}&type=model-ref`)
+        .then(r => r.json()).then(d => { if (d.dataUrl) setModelUrl(d.dataUrl); }).catch(() => {});
+    }
   };
 
   const handleSave = async () => {
     if (!selectedId) return;
+    setSaving(true);
+    setSaved(false);
     try {
       const res = await fetch("/api/customers", {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -65,8 +84,10 @@ export default function CustomersPage() {
       if (!res.ok) throw new Error("保存失败");
       const updated = await res.json();
       setCustomers(prev => prev.map(c => c.id === selectedId ? { ...c, ...updated } : c));
-      select(updated);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
     } catch (e: any) { alert(e.message); }
+    finally { setSaving(false); }
   };
 
   const handleDelete = async () => {
@@ -165,8 +186,8 @@ export default function CustomersPage() {
                 <div>
                   <label className="block text-sm font-medium mb-2">品牌 Logo</label>
                   <div onClick={() => logoRef.current?.click()} className="w-36 h-16 border-2 border-dashed border-border rounded-lg flex items-center justify-center cursor-pointer hover:border-accent/30 overflow-hidden">
-                    {selected.logo ? (
-                      <img src={`/api/customers/assets?id=${selected.id}&type=logo`} alt="Logo" className="max-w-full max-h-full object-contain p-1" />
+                    {selected.logo && logoUrl ? (
+                      <img src={logoUrl} alt="Logo" className="max-w-full max-h-full object-contain p-1" />
                     ) : (
                       <span className="text-xs text-muted">点击上传</span>
                     )}
@@ -176,8 +197,8 @@ export default function CustomersPage() {
                 <div>
                   <label className="block text-sm font-medium mb-2">模特参考图</label>
                   <div onClick={() => modelRefRef.current?.click()} className="w-24 h-24 border-2 border-dashed border-border rounded-lg flex items-center justify-center cursor-pointer hover:border-accent/30 overflow-hidden">
-                    {selected.modelRef ? (
-                      <img src={`/api/customers/assets?id=${selected.id}&type=model-ref`} alt="模特" className="w-full h-full object-cover" />
+                    {selected.modelRef && modelUrl ? (
+                      <img src={modelUrl} alt="模特" className="w-full h-full object-cover" />
                     ) : (
                       <span className="text-xs text-muted">点击上传</span>
                     )}
@@ -251,9 +272,13 @@ export default function CustomersPage() {
                   rows={3} className="w-full px-3 py-2 border border-border rounded-lg text-sm resize-none" />
               </div>
 
-              <div className="flex gap-2">
-                <button onClick={handleSave}
-                  className="px-6 py-2 bg-accent text-accent-on rounded-lg text-sm font-medium hover:bg-accent-active transition-colors">保存</button>
+              <div className="flex gap-2 items-center">
+                <button onClick={handleSave} disabled={saving}
+                  className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    saved ? "bg-green-600 text-white" : "bg-accent text-accent-on hover:bg-accent-active"
+                  } disabled:opacity-60`}>
+                  {saving ? "保存中…" : saved ? "✅ 已保存" : "保存"}
+                </button>
                 <button onClick={() => setSelectedId(null)}
                   className="px-4 py-2 border border-border text-muted rounded-lg text-sm hover:bg-surface-warm transition-colors">取消</button>
               </div>
