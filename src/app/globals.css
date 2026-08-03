@@ -1,18 +1,69 @@
+@import "./tokens.css";
+@import "./kami-tailwind.css";
 @import "tailwindcss";
 
 @theme {
-  --color-brand: #1a1a1a;
-  --color-brand-hover: #333;
-  --color-surface: #fafaf9;
-  --color-surface-card: #ffffff;
-  --color-border: #e8e8e5;
-  --color-text-muted: #6b6b6b;
-  --color-accent-warm: #b8a88a;
+  /* 主品牌色 → kami accent */
+  --color-brand: var(--accent);
+  --color-brand-hover: var(--accent-active);
+
+  /* 表面色 */
+  --color-surface: var(--bg);
+  --color-surface-card: var(--surface);
+
+  /* 通用映射 */
+  --color-text: var(--fg);
+  --color-text-muted: var(--muted);
+  --color-border: var(--border);
+
+  /* 状态色 — kami 温和的语义色 */
+  --color-blue-50: #EEF2F7;
+  --color-blue-200: #D0DCE9;
+  --color-blue-500: var(--accent);
+  --color-blue-600: var(--accent);
+  --color-blue-700: var(--accent-active);
+  --color-blue-800: var(--accent-active);
+
+  --color-green-50: #F0F4EC;
+  --color-green-200: #CDDBC4;
+  --color-green-600: var(--success);
+  --color-green-700: #3A562B;
+
+  --color-red-50: #F9F0EF;
+  --color-red-200: #E4C8C4;
+  --color-red-500: var(--danger);
+  --color-red-600: var(--danger);
+  --color-red-700: #6E2E25;
+
+  --color-yellow-50: #F8F3E4;
+  --color-yellow-200: #E8D8B4;
+  --color-yellow-600: var(--warn);
+  --color-yellow-800: var(--warn);
+
+  --color-orange-500: var(--warn);
+  --color-purple-50: #F3F0F7;
+  --color-purple-200: #D6CFE4;
+  --color-purple-600: #5B4A7A;
+
+  /* 灰色系 → kami 暖灰 */
+  --color-gray-50: var(--surface);
+  --color-gray-100: var(--surface-warm);
+  --color-gray-200: var(--border);
+  --color-white: var(--surface);
+
+  --shadow-brand\/20: 0 4px 12px rgba(27, 54, 93, 0.12);
+  --shadow-brand\/30: 0 4px 16px rgba(27, 54, 93, 0.18);
 }
 
 body {
-  font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: var(--color-surface);
-  color: var(--color-brand);
+  font-family: "Charter", "Georgia", "TsangerJinKai02", "Source Han Serif SC", "Noto Serif CJK SC", serif;
+  background: var(--bg);
+  color: var(--fg);
   -webkit-font-smoothing: antialiased;
+  line-height: 1.55;
+}
+
+/* 表单和UI元素保留无衬线 */
+input, textarea, select, button, .font-ui {
+  font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
