@@ -209,6 +209,8 @@ export default function OutputPage() {
               setQueueItems((prev) =>
                 prev.map((p) => (p.id === qi.id ? { ...p, status: "running" } : p))
               );
+            } else if (task.status === "running") {
+              // 已经是 running，不需要改变
             } else {
               // 任务可能已完成但服务重启丢失了内存状态，检查磁盘
               const entries = await getHistory();
