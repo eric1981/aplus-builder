@@ -11,7 +11,7 @@ export default function Landing() {
           Powered by Duma Agent
         </div>
         <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-3 sm:mb-4">
-          Amazon A+ 详情生成器
+          Amazon A+ 视觉工业流水线
         </h1>
         <p className="text-sm sm:text-lg text-text-muted max-w-xl mx-auto mb-2 sm:mb-3">
           上传一张白底产品图，AI 自动完成全流程
