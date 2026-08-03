@@ -20,11 +20,16 @@ export default function Landing() {
           产品特征分析 → 多场景图生成 → A+ 详情页排版 → 一键下载交付
         </p>
         <Link
-          href="/build?new"
+          href="/build"
           className="inline-block px-6 sm:px-8 py-3 sm:py-3.5 bg-brand text-white rounded-xl text-sm sm:text-base font-medium hover:bg-brand-hover transition-colors shadow-lg shadow-brand/20"
         >
           ✨ 开始使用
         </Link>
+        <div className="mt-4">
+          <Link href="/customers" className="text-xs sm:text-sm text-text-muted hover:text-brand transition-colors">
+            👤 管理客户资料
+          </Link>
+        </div>
       </div>
 
       {/* 三步流程 */}
