@@ -30,6 +30,7 @@ interface QueueItem {
   variants?: TaskVariant[];
   error?: string;
   agentLog?: string;
+  completedAt?: number;
 }
 
 interface SavedState {
@@ -53,8 +54,8 @@ function loadState(): SavedState | null {
 function saveState(state: Partial<SavedState>) {
   try {
     const clean: SavedState = {
-      queueItems: (state.queueItems || []).map(({ id, taskId, status, productName, description }) => ({
-        id, taskId, status, productName, description,
+      queueItems: (state.queueItems || []).map(({ id, taskId, status, productName, description, completedAt }) => ({
+        id, taskId, status, productName, description, completedAt,
       })),
       preferences: state.preferences,
     };
@@ -126,7 +127,13 @@ export default function OutputPage() {
 
   // 队列中的各状态分组
   const activeItems = queueItems.filter((q) => POLL_STATUSES.has(q.status));
-  const doneItems = queueItems.filter((q) => q.status === "done");
+  const doneItems = queueItems.filter((q) => {
+    if (q.status !== "done") return false;
+    if (!q.completedAt) return true; // 无时间戳的老数据，保留兼容
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return q.completedAt >= today.getTime();
+  });
   const errorItems = queueItems.filter((q) => q.status === "error");
   const hasQueue = activeItems.length > 0 || errorItems.length > 0;
 
@@ -201,7 +208,7 @@ export default function OutputPage() {
               setQueueItems((prev) =>
                 prev.map((p) =>
                   p.id === qi.id
-                    ? { ...p, status: "done", html: task.html, images: task.images || [], variants: task.variants || [] }
+                    ? { ...p, status: "done", html: task.html, images: task.images || [], variants: task.variants || [], completedAt: Date.now() }
                     : p
                 )
               );
@@ -239,7 +246,7 @@ export default function OutputPage() {
                   setQueueItems((prev) =>
                     prev.map((p) =>
                       p.id === qi.id
-                        ? { ...p, status: "done", html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })) }
+                        ? { ...p, status: "done", html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })), completedAt: Date.now() }
                         : p
                     )
                   );
