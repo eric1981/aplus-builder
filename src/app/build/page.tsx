@@ -289,10 +289,10 @@ export default function BuildPage() {
       <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-border">
         <div className="max-w-2xl mx-auto px-3 sm:px-4 h-12 sm:h-14 flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <a href="/" className="text-text-muted hover:text-brand text-xs sm:text-sm flex-shrink-0">←</a>
+            <a href="/" className="text-muted hover:text-accent text-xs sm:text-sm flex-shrink-0">←</a>
             <h1 className="text-base sm:text-lg font-semibold tracking-tight flex items-center gap-1.5 sm:gap-2 truncate">
               <span className="hidden sm:inline">A+ 详情生成</span>
-              <span className="text-xs font-normal text-text-muted bg-gray-100 px-1.5 sm:px-2 py-0.5 rounded truncate">批量</span>
+              <span className="text-xs font-normal text-muted bg-surface-warm px-1.5 sm:px-2 py-0.5 rounded truncate">批量</span>
               {profileLoaded && (
                 <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">🧠 学习中</span>
               )}
@@ -302,15 +302,15 @@ export default function BuildPage() {
             <select
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
-              className="text-xs border border-border rounded-lg px-2 py-1 bg-white max-w-[100px] sm:max-w-[140px] truncate"
+              className="text-xs border border-border rounded-lg px-2 py-1 bg-surface max-w-[100px] sm:max-w-[140px] truncate"
             >
               <option value="">全部客户</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <a href="/customers" className="text-xs text-brand hover:text-brand-hover font-medium">👤 管理</a>
-            <a href="/output" className="text-xs text-brand hover:text-brand-hover font-medium">📋 产出</a>
+            <a href="/customers" className="text-xs text-muted hover:text-accent font-medium">👤 客户</a>
+            <a href="/output" className="text-xs text-muted hover:text-accent font-medium">📋 产出</a>
             <span className={`text-[10px] sm:text-xs font-medium ${credits <= 2 ? "text-red-500" : credits <= 5 ? "text-orange-500" : "text-text-muted"}`}>{credits}积分</span>
           </div>
         </div>

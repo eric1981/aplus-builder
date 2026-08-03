@@ -376,11 +376,12 @@ export default function OutputPage() {
       <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-border">
         <div className="max-w-2xl lg:max-w-5xl mx-auto px-3 sm:px-4 h-12 sm:h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <a href="/build" className="text-text-muted hover:text-brand text-xs sm:text-sm">← 新建任务</a>
+            <a href="/" className="text-text-muted hover:text-accent text-xs sm:text-sm">←</a>
             <h1 className="text-base sm:text-lg font-semibold tracking-tight">产出中心</h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <a href="/customers" className="text-xs text-brand hover:text-brand-hover font-medium">👤 客户</a>
+            <a href="/customers" className="text-xs text-muted hover:text-accent font-medium">👤 客户</a>
+            <a href="/build" className="text-xs bg-accent text-accent-on px-2.5 py-1 rounded-md font-medium hover:bg-accent-active transition-colors">✚ 新建</a>
           </div>
         </div>
       </header>
