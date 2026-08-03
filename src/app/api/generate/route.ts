@@ -170,9 +170,21 @@ export async function POST(request: NextRequest) {
     // 先取 description 和 product_name 用于目录命名
     const description = (formData.get("description") as string) || "";
     const productNameInput = (formData.get("product_name") as string) || "";
+    const customerName = (formData.get("customer_name") as string) || "";
 
     const productDir = sanitizeProductName(productNameInput || description, taskId);
-    const workDir = join(OUTPUT_BASE, productDir);
+
+    // 客户名安全化（跟 sanitizeProductName 逻辑一致但不需要 taskId fallback）
+    const customerDir = customerName
+      ? customerName.trim().slice(0, 20)
+          .replace(/[^a-zA-Z0-9\u4e00-\u9fff\s]/g, "-")
+          .replace(/\s+/g, "-").replace(/-+/g, "-")
+          .replace(/^-|-$/g, "")
+      : "";
+
+    const workDir = customerDir
+      ? join(OUTPUT_BASE, customerDir, productDir)
+      : join(OUTPUT_BASE, productDir);
     const inputDir = join(workDir, "input");
     const outputDir = workDir;
     const promptFile = join(workDir, "prompt.txt");
@@ -213,6 +225,11 @@ export async function POST(request: NextRequest) {
     }
 
     const profileContext = (formData.get("profile_context") as string) || "";
+
+    // 客户数据
+    const customerId = (formData.get("customer_id") as string) || "";
+    const customerSizeChart = (formData.get("customer_size_chart") as string) || "";
+    const customerRequirements = (formData.get("customer_requirements") as string) || "";
 
     let uiPrefs: { style?: string; odStyle?: string; model?: string } = {};
     try {
@@ -257,32 +274,67 @@ export async function POST(request: NextRequest) {
       prefLines.push(profileContext);
     }
 
+    const mode = (formData.get("mode") as string) || "detail";
+
     const descBlock = description.trim()
       ? `\n产品信息：${description}\n`
-      : "\n（用户未提供描述，请根据产品图自行分析品类、面料、风格并生成详情页）\n";
+      : (mode === "single"
+          ? "\n（用户未提供描述，请根据产品图自行分析品类、面料、风格并生成场景图）\n"
+          : "\n（用户未提供描述，请根据产品图自行分析品类、面料、风格并生成详情页）\n");
 
-    const prompt = [
-      `帮我生成这个产品的电商详情页。`,
-      ``,
-      `产品图：${imgPath}`,
-      ...(modelRefPath ? [`模特参考图：${modelRefPath}`] : []),
-      ...(logoPath ? [`品牌 Logo：${logoPath}（请将 Logo 嵌入详情页顶部品牌区或底部页脚，使用 <img src="./logo.png"> 引用，保持原始比例不拉伸变形）`] : []),
-      descBlock,
-      ...(prefLines.length > 0 ? [`偏好参考：`, ...prefLines, ``] : []),
-      `【重要规则】`,
-      `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
-      `- 把最终产出物（index.html、图片、manifest）全部放到 ${outputDir}/ 下面。`,
-      `- HTML 里的图片使用相对路径（如 ./scene_01.png）。`,
-      `- 生成完成后直接写入 index.html，不要无限迭代优化。`,
-      `- 在 image-manifest.json 中记录每张图使用的 prompt。`,
-      ``,
-      `【多版本输出 — 使用同一套图片，生成多个风格变体】`,
-      `- 主输出（用户选的风格）：${outputDir}/index.html`,
-      ...variantStyles.map((s, i) => `- 变体 ${i + 1}（${s}）：${outputDir}/variant_${i + 1}.html`),
-      `- 所有变体 HTML 都必须包含相同的一套图片，只改变排版/字体/颜色/布局。`,
-      `- 每个变体的风格必须适合该产品的品类和调性，不要选与产品气质冲突的模板或配色。`,
-      `- 文件名必须严格使用 index.html、variant_1.html、variant_2.html。`,
-    ].join("\n");
+    let prompt: string;
+
+    if (mode === "single") {
+      // ===== 单图模式：只出 1 张场景图 =====
+      prompt = [
+        `帮我生成1张产品场景图。`,
+        ``,
+        `产品图：${imgPath}`,
+        ...(modelRefPath ? [`模特参考图：${modelRefPath}`] : []),
+        descBlock,
+        ...(prefLines.length > 0 ? [`偏好参考：`, ...prefLines, ``] : []),
+        ...(customerName ? [``, `【客户档案 — ${customerName}】`, `以下为该客户的特定要求，生成时必须遵守：`] : []),
+        ...(customerRequirements ? [`- 其他要求：${customerRequirements}`] : []),
+        ...(customerName ? [``] : []),
+        `【重要规则】`,
+        `- 只生成一张场景图，把产品放到合适的场景中（例如咖啡厅、街头、工作室等）。`,
+        `- 不要生成白底抠图、多角度图、详情页长图或多张场景图，就一张。`,
+        `- 不要生成 HTML 详情页 —— 只出一张场景图。`,
+        `- 不要询问我任何问题，自己决定所有选择。`,
+        `- 把图片保存到 ${outputDir}/scene_01.png。`,
+        `- 在 ${outputDir}/ 下创建一个简单的 index.html，只内嵌这张场景图：<img src="./scene_01.png" style="width:100%;max-width:800px;margin:0 auto;display:block;">`,
+        `- 在 image-manifest.json 中记录图片使用的 prompt。`,
+        `- 生成完成后直接结束，不要迭代优化。`,
+      ].join("\n");
+    } else {
+      // ===== 详情页模式 =====
+      prompt = [
+        `帮我生成这个产品的电商详情页。`,
+        ``,
+        `产品图：${imgPath}`,
+        ...(modelRefPath ? [`模特参考图：${modelRefPath}`] : []),
+        ...(logoPath ? [`品牌 Logo：${logoPath}（请将 Logo 嵌入详情页顶部品牌区或底部页脚，使用 <img src="./logo.png"> 引用，保持原始比例不拉伸变形）`] : []),
+        descBlock,
+        ...(prefLines.length > 0 ? [`偏好参考：`, ...prefLines, ``] : []),
+        ...(customerName ? [``, `【客户档案 — ${customerName}】`, `以下为该客户的特定要求，生成时必须遵守：`] : []),
+        ...(customerSizeChart ? [`- 尺码表（CSV 格式，请解析并在详情页中正确展示）：\n${customerSizeChart}`] : []),
+        ...(customerRequirements ? [`- 其他要求：${customerRequirements}`] : []),
+        ...(customerName ? [``] : []),
+        `【重要规则】`,
+        `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
+        `- 把最终产出物（index.html、图片、manifest）全部放到 ${outputDir}/ 下面。`,
+        `- HTML 里的图片使用相对路径（如 ./scene_01.png）。`,
+        `- 生成完成后直接写入 index.html，不要无限迭代优化。`,
+        `- 在 image-manifest.json 中记录每张图使用的 prompt。`,
+        ``,
+        `【多版本输出 — 使用同一套图片，生成多个风格变体】`,
+        `- 主输出（用户选的风格）：${outputDir}/index.html`,
+        ...variantStyles.map((s, i) => `- 变体 ${i + 1}（${s}）：${outputDir}/variant_${i + 1}.html`),
+        `- 所有变体 HTML 都必须包含相同的一套图片，只改变排版/字体/颜色/布局。`,
+        `- 每个变体的风格必须适合该产品的品类和调性，不要选与产品气质冲突的模板或配色。`,
+        `- 文件名必须严格使用 index.html、variant_1.html、variant_2.html。`,
+      ].join("\n");
+    }
 
     writeFileSync(promptFile, prompt, "utf-8");
 
@@ -303,6 +355,7 @@ export async function POST(request: NextRequest) {
       userId: "anonymous",
       status: activeCount >= MAX_CONCURRENT ? "queued" : "running",
       workDir,
+      mode,
       createdAt: Date.now(),
     });
 
@@ -344,6 +397,13 @@ export async function GET(request: NextRequest) {
     if (!existsSync(join(t.workDir, "run.sh"))) {
       tasks.set(t.taskId, { status: "error", error: "任务数据已丢失", log: "" });
       taskStore.remove(t.taskId);
+      continue;
+    }
+
+    // 如果 index.html 已存在，说明 Agent 已完成，直接标记 done
+    if (existsSync(join(t.workDir, "index.html"))) {
+      taskStore.remove(t.taskId);
+      console.log(`[hermes-cli] ✅ 恢复时发现已完成：${t.workDir}`);
       continue;
     }
 

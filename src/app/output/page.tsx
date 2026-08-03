@@ -137,6 +137,26 @@ export default function OutputPage() {
     setHydrated(true);
   }, []);
 
+  // -- 为无 html 的 done 项从磁盘加载内容 --
+  useEffect(() => {
+    if (!hydrated || historyEntries.length === 0) return;
+    for (const item of queueItems) {
+      if (item.status !== "done" || item.html) continue;
+      const match = historyEntries.find((e: HistoryEntry) => e.dirName === item.productName);
+      if (!match) continue;
+      loadOutput(match.dirName).then((data) => {
+        if (!data?.html) return;
+        setQueueItems((prev) =>
+          prev.map((p) =>
+            p.id === item.id
+              ? { ...p, html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })) }
+              : p
+          )
+        );
+      }).catch(() => {});
+    }
+  }, [hydrated, historyEntries]);
+
   useEffect(() => { if (hydrated) saveState({ queueItems }); }, [queueItems, hydrated]);
 
   useEffect(() => {
@@ -190,6 +210,27 @@ export default function OutputPage() {
                 prev.map((p) => (p.id === qi.id ? { ...p, status: "running" } : p))
               );
             } else {
+              // 任务可能已完成但服务重启丢失了内存状态，检查磁盘
+              const entries = await getHistory();
+              const match = entries.find((e: HistoryEntry) =>
+                e.dirName === qi.productName || e.dirName.includes(qi.id.slice(-8))
+              );
+              if (match) {
+                setHistoryEntries(entries);
+                const data = await loadOutput(match.dirName);
+                if (data?.html) {
+                  setQueueItems((prev) =>
+                    prev.map((p) =>
+                      p.id === qi.id
+                        ? { ...p, status: "done", html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })) }
+                        : p
+                    )
+                  );
+                  setActiveResultId(qi.id);
+                  continue;
+                }
+              }
+              // 确实丢失了
               setQueueItems((prev) =>
                 prev.map((p) =>
                   p.id === qi.id ? { ...p, status: "error", error: task.error || "任务连接丢失" } : p
