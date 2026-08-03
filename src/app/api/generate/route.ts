@@ -8,13 +8,14 @@ import { taskStore, type PersistedTask } from "./task-store";
 const OUTPUT_BASE = join("/Users", "eric", "Downloads", "aplus-builder");
 
 function sanitizeProductName(description: string, taskId: string): string {
-  if (!description.trim()) return `未命名产品-${taskId.slice(0, 8)}`;
-  // 取前 40 个字符，只保留中英文、数字、空格，替换其余为连字符
+  const tid = taskId.slice(0, 8);
+  if (!description.trim()) return `未命名产品-${tid}`;
   const cleaned = description.trim().slice(0, 40)
     .replace(/[^a-zA-Z0-9\u4e00-\u9fff\s]/g, "-")
     .replace(/\s+/g, "-").replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
-  return cleaned || `未命名产品-${taskId.slice(0, 8)}`;
+  const base = cleaned || "未命名产品";
+  return `${base}-${tid}`;
 }
 
 type TaskImage = { name: string; base64: string; mime: string };
