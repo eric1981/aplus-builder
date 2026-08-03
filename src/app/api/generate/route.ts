@@ -231,6 +231,7 @@ export async function POST(request: NextRequest) {
     const customerId = (formData.get("customer_id") as string) || "";
     const customerSizeChart = (formData.get("customer_size_chart") as string) || "";
     const customerRequirements = (formData.get("customer_requirements") as string) || "";
+    const customTemplateId = (formData.get("custom_template_id") as string) || "";
 
     let uiPrefs: { style?: string; odStyle?: string; model?: string } = {};
     try {
@@ -241,7 +242,11 @@ export async function POST(request: NextRequest) {
     // ---- prompt 组装 ----
     const prefLines: string[] = [];
 
-    if (uiPrefs.odStyle) {
+    // 客户自定义风格模板优先级最高
+    if (customTemplateId) {
+      const templatePath = join(process.cwd(), "customer-templates", `${customTemplateId}.html`);
+      prefLines.push(`- 排版风格：使用客户自定义模板 \"${templatePath}\"（必须严格参考此模板的视觉风格、配色、字体、模块结构来生成详情页）`);
+    } else if (uiPrefs.odStyle) {
       prefLines.push(`- 排版风格：使用 Open Design 模板 "${uiPrefs.odStyle}"（用户指定，必须使用）`);
     } else if (uiPrefs.style && uiPrefs.style !== "auto") {
       const styleLabel: Record<string, string> = {

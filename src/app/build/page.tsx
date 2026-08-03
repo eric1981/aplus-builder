@@ -44,6 +44,7 @@ interface CustomerInfo {
   requirements?: string;
   defaultStyle?: string;
   defaultModel?: string;
+  customTemplateId?: string;
 }
 
 let _idCounter = 0;
@@ -250,6 +251,7 @@ export default function BuildPage() {
           formData.append("customer_name", cust.name);
           if (cust.sizeChartCsv) formData.append("customer_size_chart", cust.sizeChartCsv);
           if (cust.requirements) formData.append("customer_requirements", cust.requirements);
+          if (cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
         }
       }
 
@@ -311,6 +313,7 @@ export default function BuildPage() {
             </select>
             <a href="/customers" className="text-xs text-muted hover:text-accent font-medium">👤 客户</a>
             <a href="/output" className="text-xs text-muted hover:text-accent font-medium">📋 产出</a>
+            <a href="/style-extract" className="text-xs text-muted hover:text-accent font-medium">🎨 复刻</a>
             <span className={`text-[10px] sm:text-xs font-medium ${credits <= 2 ? "text-red-500" : credits <= 5 ? "text-orange-500" : "text-text-muted"}`}>{credits}积分</span>
           </div>
         </div>

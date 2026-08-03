@@ -1,5 +1,3 @@
-node_modules/
-.next/
-.env.local
-*.tsbuildinfo
-.DS_Store
+# 客户档案（含品牌 Logo、模特图、定制模板等敏感数据）
+customers/
+customer-templates/
