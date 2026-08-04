@@ -264,6 +264,7 @@ export async function POST(request: NextRequest) {
     };
     const ALL_STYLES = ["Editorial 暖杂志风", "Swiss 瑞士风", "Product Launch 暗底Hero风"];
     const variantStyles = (() => {
+      if (customTemplateId) return []; // 客户自定义模板不生成变体，模板本身即为完整视觉系统
       if (uiPrefs.odStyle) return ALL_STYLES;
       if (!uiPrefs.style || uiPrefs.style === "auto") return ALL_STYLES;
       const selected = styleLabel[uiPrefs.style] || "";
