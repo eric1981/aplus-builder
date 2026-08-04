@@ -63,7 +63,7 @@ const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/j
 
 // ===== Agent 启动（被 POST 和 recovery 共用）=====
 
-function spawnAgent(taskId: string, workDir: string) {
+function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) {
   const outputDir = workDir;
   const indexHtml = join(outputDir, "index.html");
   const manifestPath = join(outputDir, "image-manifest.json");
@@ -117,6 +117,22 @@ function spawnAgent(taskId: string, workDir: string) {
       const html = readAndEmbed(indexHtml);
       if (!html) throw new Error("Failed to read index.html");
 
+      // 后端强制保护：用客户模板的原始内容覆盖 data-hermes-protected 元素
+      let protectedHtml = html;
+      if (customTemplateId) {
+        const templatePath = join(process.cwd(), "customer-templates", `${customTemplateId}.html`);
+        if (existsSync(templatePath)) {
+          const tpl = readFileSync(templatePath, "utf-8");
+          // 逐个提取模板中所有 data-hermes-protected 元素，覆盖到输出中
+          const tplProtected = tpl.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
+          const outProtected = protectedHtml.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
+          for (let i = 0; i < Math.min(tplProtected.length, outProtected.length); i++) {
+            protectedHtml = protectedHtml.replace(outProtected[i], tplProtected[i]);
+          }
+          console.log(`[hermes-cli] 🔒 已保护 ${Math.min(tplProtected.length, outProtected.length)} 个标记元素`);
+        }
+      }
+
       const variants: { name: string; html: string }[] = [];
       const STYLE_NAMES = ["Swiss 瑞士风", "Product Launch 暗底Hero风", "Editorial 暖杂志风"];
       for (let i = 1; i <= 3; i++) {
@@ -125,8 +141,8 @@ function spawnAgent(taskId: string, workDir: string) {
         if (vHtml) variants.push({ name: STYLE_NAMES[i - 1] || `变体 ${i}`, html: vHtml });
       }
 
-      finalize("done", html, undefined, images, signal, variants.length > 0 ? variants : undefined);
-      console.log(`[hermes-cli] ✅ HTML ${html.length} chars, ${images.length} images, ${variants.length} variants`);
+      finalize("done", protectedHtml, undefined, images, signal, variants.length > 0 ? variants : undefined);
+      console.log(`[hermes-cli] ✅ HTML ${protectedHtml.length} chars, ${images.length} images, ${variants.length} variants`);
 
       captureGalleryScreenshots(outputDir);
       return true;
@@ -376,13 +392,13 @@ export async function POST(request: NextRequest) {
     // 检查并发
     if (activeCount >= MAX_CONCURRENT) {
       tasks.set(taskId, { status: "queued", queuePosition: 1, log: "" });
-      queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir) });
+      queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId) });
       updateQueuePositions();
       return NextResponse.json({ taskId, queued: true, queuePosition: 1 });
     }
 
     activeCount++;
-    spawnAgent(taskId, workDir);
+    spawnAgent(taskId, workDir, customTemplateId);
     return NextResponse.json({ taskId });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "启动失败" }, { status: 500 });
