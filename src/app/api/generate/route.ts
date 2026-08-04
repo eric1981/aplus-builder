@@ -327,6 +327,13 @@ export async function POST(request: NextRequest) {
         ...(customerSizeChart ? [`- 尺码表（CSV 格式，请解析并在详情页中正确展示）：\n${customerSizeChart}`] : []),
         ...(customerRequirements ? [`- 其他要求：${customerRequirements}`] : []),
         ...(customerName ? [``] : []),
+        ...(customTemplateId ? [
+          `【模板保护标记】`,
+          `- 客户模板 HTML 中所有带 data-hermes-protected 属性的元素及其内容，严禁任何修改。`,
+          `- 包括但不限于：Logo、品牌标识、版权信息、品牌色定义（CSS 变量）。`,
+          `- 这些标记元素必须原样保留在输出 HTML 中，不得删除、替换、修改属性或内容。`,
+          ``
+        ] : []),
         `【重要规则】`,
         `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
         `- 把最终产出物（index.html、图片、manifest）全部放到 ${outputDir}/ 下面。`,
