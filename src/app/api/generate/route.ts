@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn, spawnSync } from "child_process";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync } from "fs";
-import { join, extname } from "path";
+import { join, extname, dirname } from "path";
 import { randomUUID } from "crypto";
 import { taskStore, type PersistedTask } from "./task-store";
 
@@ -110,11 +110,16 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
   };
 
   const collectAndFinish = () => {
-    if (!existsSync(indexHtml)) return false;
+    // Agent 可能多写一层 output/ 子目录
+    const actualIndex = existsSync(indexHtml) ? indexHtml
+      : existsSync(join(outputDir, "output", "index.html")) ? join(outputDir, "output", "index.html")
+      : null;
+    if (!actualIndex) return false;
+    const actualOutputDir = dirname(actualIndex);
     try {
-      const images = collectImages(outputDir);
+      const images = collectImages(actualOutputDir);
       const signal = extractPreferenceSignal(manifestPath);
-      const html = readAndEmbed(indexHtml);
+      const html = readAndEmbed(actualIndex);
       if (!html) throw new Error("Failed to read index.html");
 
       // 后端强制保护：用客户模板的原始内容覆盖 data-hermes-protected 元素
