@@ -422,7 +422,7 @@ export default function BuildPage() {
         <div>
           <h2 className="text-base sm:text-lg font-semibold mb-2">品类 <span className="text-red-400 text-xs ml-1">必选</span></h2>
           <div className="flex flex-wrap gap-2">
-            {["上衣","裤子","套装","鞋帽","箱包"].map((cat) => (
+            {["上衣","裤子","裙装","套装","鞋帽","箱包"].map((cat) => (
               <button key={cat} type="button" onClick={() => setFormCategory(formCategory === cat ? "" : cat)}
                 className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition
                   ${formCategory === cat ? "bg-accent text-accent-on border-accent" : "bg-surface text-muted border-border hover:border-accent"}`}
