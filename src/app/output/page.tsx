@@ -208,7 +208,8 @@ export default function OutputPage() {
               setQueueItems((prev) =>
                 prev.map((p) =>
                   p.id === qi.id
-                    ? { ...p, status: "done", html: task.html, images: task.images || [], variants: task.variants || [], completedAt: Date.now() }
+                    ? { ...p, status: "done", html: task.html, images: task.images || [], variants: task.variants || [],
+                        completedAt: Date.now(), productName: task.productName || p.productName }
                     : p
                 )
               );

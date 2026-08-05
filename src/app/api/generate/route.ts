@@ -25,6 +25,7 @@ type Task = {
   images?: TaskImage[];
   variants?: { name: string; html: string }[];
   preference_signal?: string;
+  productName?: string;
   error?: string;
   log?: string;
   queuePosition?: number;
@@ -88,10 +89,10 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
   let logBuffer = "";
   let settled = false;
 
-  const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string, variants?: { name: string; html: string }[]) => {
+  const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string, variants?: { name: string; html: string }[], productName?: string) => {
     if (settled) return;
     settled = true;
-    tasks.set(taskId, { status, html, images, variants, preference_signal: signal, error: errMsg, log: logBuffer.slice(-5000) });
+    tasks.set(taskId, { status, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
     taskStore.remove(taskId);
     releaseSlot();
   };
@@ -164,10 +165,8 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
         }
       }
 
-      finalize("done", protectedHtml, undefined, images, signal, variants.length > 0 ? variants : undefined);
-      console.log(`[hermes-cli] ✅ HTML ${protectedHtml.length} chars, ${images.length} images, ${variants.length} variants`);
-
-      // 从 manifest 提取产品名，重命名目录
+      // 从 manifest 提取产品名并重命名目录（先于 finalize，以便传给前端）
+      let finalProductName = "";
       if (existsSync(manifestPath)) {
         try {
           const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -175,7 +174,6 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
           const category: string = typeof product === "object" && product
             ? (product.category || "")
             : typeof product === "string" ? product : "";
-          // 取中文部分："连帽卫衣 (Hoodie)" → "连帽卫衣"
           const chinese = category.replace(/\(.*?\)/g, "").trim()
             .replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
           if (chinese && !workDir.endsWith(chinese)) {
@@ -184,10 +182,14 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
             renameSync(workDir, newWorkDir);
             outputDir = join(newWorkDir, "output");
             indexHtml = join(outputDir, "index.html");
-            console.log(`[hermes-cli] 📁 已重命名：${workDir} → ${newWorkDir}`);
+            finalProductName = chinese;
+            console.log(`[hermes-cli] 📁 已重命名并通知：${newWorkDir}`);
           }
         } catch {}
       }
+
+      finalize("done", protectedHtml, undefined, images, signal, variants.length > 0 ? variants : undefined, finalProductName || undefined);
+      console.log(`[hermes-cli] ✅ HTML ${protectedHtml.length} chars, ${images.length} images, ${variants.length} variants`);
 
       captureGalleryScreenshots(outputDir);
       return true;
@@ -397,6 +399,7 @@ export async function POST(request: NextRequest) {
         ] : []),
         `【重要规则】`,
         `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
+        `- ⚠️ 所有 HTML、变体HTML、图片必须放进 output/ 子目录，不可散落在根目录。`,
         `- 把最终交付物（index.html、变体HTML、图片）全部放到 ${outputDir}/ 下面。`,
         `- 把元数据文件（image-manifest.json）放到 ${workDir}/ 下面。`,
         `- HTML 里的图片使用相对路径（如 ./scene_01.png）。`,
