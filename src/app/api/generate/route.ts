@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn, spawnSync } from "child_process";
-import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync } from "fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync, renameSync } from "fs";
 import { join, extname, dirname } from "path";
 import { randomUUID } from "crypto";
 import { taskStore, type PersistedTask } from "./task-store";
@@ -64,8 +64,8 @@ const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/j
 // ===== Agent 启动（被 POST 和 recovery 共用）=====
 
 function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) {
-  const outputDir = join(workDir, "output");       // 客户交付物放 output/ 子目录
-  const indexHtml = join(outputDir, "index.html");
+  let outputDir = join(workDir, "output");       // 客户交付物放 output/ 子目录
+  let indexHtml = join(outputDir, "index.html");
   const manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录
   const logFile = join(workDir, "agent.log");
   const scriptPath = join(workDir, "run.sh");
@@ -148,6 +148,25 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
 
       finalize("done", protectedHtml, undefined, images, signal, variants.length > 0 ? variants : undefined);
       console.log(`[hermes-cli] ✅ HTML ${protectedHtml.length} chars, ${images.length} images, ${variants.length} variants`);
+
+      // 从 manifest 提取产品名，重命名目录
+      if (existsSync(manifestPath)) {
+        try {
+          const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+          const category = manifest?.product?.category || "";
+          // 取中文部分："连帽卫衣 (Hoodie)" → "连帽卫衣"
+          const chinese = category.replace(/\(.*?\)/g, "").trim()
+            .replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+          if (chinese && !workDir.endsWith(chinese)) {
+            const parent = dirname(workDir);
+            const newWorkDir = join(parent, `${chinese}-${taskId.slice(0, 8)}`);
+            renameSync(workDir, newWorkDir);
+            outputDir = join(newWorkDir, "output");
+            indexHtml = join(outputDir, "index.html");
+            console.log(`[hermes-cli] 📁 已重命名：${workDir} → ${newWorkDir}`);
+          }
+        } catch {}
+      }
 
       captureGalleryScreenshots(outputDir);
       return true;
