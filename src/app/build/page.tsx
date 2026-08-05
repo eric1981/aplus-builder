@@ -94,8 +94,8 @@ function loadState(): SavedState | null {
 function saveState(state: Partial<SavedState>) {
   try {
     const clean: SavedState = {
-      queueItems: (state.queueItems || []).map(({ id, taskId, status, productName, description }) => ({
-        id, taskId, status, productName, description,
+      queueItems: (state.queueItems || []).map(({ id, taskId, status, productName, description, completedAt }) => ({
+        id, taskId, status, productName, description, completedAt,
       })),
       preferences: state.preferences,
     };

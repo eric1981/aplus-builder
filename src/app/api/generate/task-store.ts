@@ -8,6 +8,8 @@ export interface PersistedTask {
   userId: string;
   status: "running" | "queued";
   workDir: string;
+  mode: string;
+  customTemplateId?: string;
   createdAt: number;
 }
 

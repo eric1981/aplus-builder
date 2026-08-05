@@ -96,14 +96,14 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
     releaseSlot();
   };
 
-  const readAndEmbed = (filePath: string): string | null => {
+  const readAndEmbed = (filePath: string, imgDir?: string): string | null => {
     if (!existsSync(filePath)) return null;
     try {
       const raw = readFileSync(filePath, "utf-8");
       let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
       const endIdx = html.lastIndexOf("</html>");
       if (endIdx !== -1) html = html.substring(0, endIdx + 7);
-      return embedImages(html, outputDir);
+      return embedImages(html, imgDir || outputDir, workDir);
     } catch {
       return null;
     }
@@ -140,10 +140,28 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
 
       const variants: { name: string; html: string }[] = [];
       const STYLE_NAMES = ["Swiss 瑞士风", "Product Launch 暗底Hero风", "Editorial 暖杂志风"];
+      // 预加载模板保护数据
+      let tplProtected: string[] = [];
+      if (customTemplateId) {
+        const templatePath = join(process.cwd(), "customer-templates", `${customTemplateId}.html`);
+        if (existsSync(templatePath)) {
+          const tpl = readFileSync(templatePath, "utf-8");
+          tplProtected = tpl.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
+        }
+      }
       for (let i = 1; i <= 3; i++) {
         const vPath = join(outputDir, `variant_${i}.html`);
-        const vHtml = readAndEmbed(vPath);
-        if (vHtml) variants.push({ name: STYLE_NAMES[i - 1] || `变体 ${i}`, html: vHtml });
+        let vHtml = readAndEmbed(vPath);
+        if (vHtml) {
+          // 变体也做模板保护
+          if (tplProtected.length > 0) {
+            const outProtected = vHtml.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
+            for (let j = 0; j < Math.min(tplProtected.length, outProtected.length); j++) {
+              vHtml = vHtml.replace(outProtected[j], tplProtected[j]);
+            }
+          }
+          variants.push({ name: STYLE_NAMES[i - 1] || `变体 ${i}`, html: vHtml });
+        }
       }
 
       finalize("done", protectedHtml, undefined, images, signal, variants.length > 0 ? variants : undefined);
@@ -153,7 +171,10 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
       if (existsSync(manifestPath)) {
         try {
           const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-          const category = manifest?.product?.category || "";
+          const product = manifest?.product;
+          const category: string = typeof product === "object" && product
+            ? (product.category || "")
+            : typeof product === "string" ? product : "";
           // 取中文部分："连帽卫衣 (Hoodie)" → "连帽卫衣"
           const chinese = category.replace(/\(.*?\)/g, "").trim()
             .replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
@@ -411,6 +432,7 @@ export async function POST(request: NextRequest) {
       status: activeCount >= MAX_CONCURRENT ? "queued" : "running",
       workDir,
       mode,
+      customTemplateId: customTemplateId || undefined,
       createdAt: Date.now(),
     });
 
@@ -466,16 +488,16 @@ export async function GET(request: NextRequest) {
     tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", log: "" });
 
     if (t.status === "queued") {
-      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir) });
+      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId) });
       continue;
     }
 
     if (activeCount < MAX_CONCURRENT) {
       activeCount++;
-      spawnAgent(t.taskId, t.workDir);
+      spawnAgent(t.taskId, t.workDir, t.customTemplateId);
     } else {
       tasks.set(t.taskId, { status: "queued", queuePosition: 1, log: "" });
-      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir) });
+      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId) });
     }
   }
   updateQueuePositions();
@@ -554,18 +576,28 @@ function collectImages(dir: string): TaskImage[] {
   return results;
 }
 
-function embedImages(html: string, baseDir: string): string {
+function embedImages(html: string, baseDir: string, fallbackDir?: string): string {
   let embedOk = 0;
   let embedMiss = 0;
-  const result = html.replace(/src="([^"]+)"/g, (match, src: string) => {
-    if (src.startsWith("http") || src.startsWith("data:")) return match;
+  const resolvePath = (src: string): string | null => {
     let imgPath: string;
     if (src.startsWith("./")) imgPath = join(baseDir, src.slice(2));
     else if (src.startsWith("../")) imgPath = join(baseDir, "..", src.slice(3));
     else imgPath = join(baseDir, src);
-    if (!existsSync(imgPath)) {
+    if (existsSync(imgPath)) return imgPath;
+    // fallback: 试试根目录（agent 可能把图片写错位置）
+    if (fallbackDir) {
+      const fbPath = join(fallbackDir, src.startsWith("./") ? src.slice(2) : src);
+      if (existsSync(fbPath)) return fbPath;
+    }
+    return null;
+  };
+  const result = html.replace(/src="([^"]+)"/g, (match, src: string) => {
+    if (src.startsWith("http") || src.startsWith("data:")) return match;
+    const imgPath = resolvePath(src);
+    if (!imgPath) {
       embedMiss++;
-      console.warn(`[embedImages] MISS: ${src} → ${imgPath} (not found)`);
+      console.warn(`[embedImages] MISS: ${src}`);
       return match;
     }
     try {
