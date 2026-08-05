@@ -130,8 +130,8 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
         if (existsSync(templatePath)) {
           const tpl = readFileSync(templatePath, "utf-8");
           // 逐个提取模板中所有 data-hermes-protected 元素，覆盖到输出中
-          const tplProtected = tpl.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
-          const outProtected = protectedHtml.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
+          const tplProtected = tpl.match(/<[^>]+data-hermes-protected(?:="[^"]*")?[^>]*>/g) || [];
+          const outProtected = protectedHtml.match(/<[^>]+data-hermes-protected(?:="[^"]*")?[^>]*>/g) || [];
           for (let i = 0; i < Math.min(tplProtected.length, outProtected.length); i++) {
             protectedHtml = protectedHtml.replace(outProtected[i], tplProtected[i]);
           }
@@ -147,7 +147,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
         const templatePath = join(process.cwd(), "customer-templates", `${customTemplateId}.html`);
         if (existsSync(templatePath)) {
           const tpl = readFileSync(templatePath, "utf-8");
-          tplProtected = tpl.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
+          tplProtected = tpl.match(/<[^>]+data-hermes-protected(?:="[^"]*")?[^>]*>/g) || [];
         }
       }
       for (let i = 1; i <= 3; i++) {
@@ -156,7 +156,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
         if (vHtml) {
           // 变体也做模板保护
           if (tplProtected.length > 0) {
-            const outProtected = vHtml.match(/<[^>]+data-hermes-protected="[^"]*"[^>]*>/g) || [];
+            const outProtected = vHtml.match(/<[^>]+data-hermes-protected(?:="[^"]*")?[^>]*>/g) || [];
             for (let j = 0; j < Math.min(tplProtected.length, outProtected.length); j++) {
               vHtml = vHtml.replace(outProtected[j], tplProtected[j]);
             }
