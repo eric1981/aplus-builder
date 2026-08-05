@@ -295,6 +295,7 @@ export async function POST(request: NextRequest) {
     const customerSizeChart = (formData.get("customer_size_chart") as string) || "";
     const customerRequirements = (formData.get("customer_requirements") as string) || "";
     const customTemplateId = (formData.get("custom_template_id") as string) || "";
+    const category = (formData.get("category") as string) || "";
 
     let uiPrefs: { style?: string; odStyle?: string; model?: string } = {};
     try {
@@ -304,6 +305,7 @@ export async function POST(request: NextRequest) {
 
     // ---- prompt 组装 ----
     const prefLines: string[] = [];
+    if (category) prefLines.push(`- 品类：${category}（用户指定，生成时必须匹配此品类）`);
 
     // 客户自定义风格模板优先级最高
     if (customTemplateId) {

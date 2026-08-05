@@ -119,6 +119,7 @@ export default function BuildPage() {
   const [formLogoImageFile, setFormLogoImageFile] = useState<File | null>(null);
   const [formDescription, setFormDescription] = useState("");
   const [formProductName, setFormProductName] = useState("");
+  const [formCategory, setFormCategory] = useState("");
 
   // -- 队列（轻量，不轮询）--
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
@@ -211,7 +212,7 @@ export default function BuildPage() {
     setFormImage(null); setFormImageFile(null);
     setFormModelImage(null); setFormModelImageFile(null);
     setFormLogoImage(null); setFormLogoImageFile(null);
-    setFormDescription(""); setFormProductName("");
+    setFormDescription(""); setFormProductName(""); setFormCategory("");
   };
 
   // -- 加入队列 --
@@ -241,6 +242,7 @@ export default function BuildPage() {
       if (item.logoImageFile) formData.append("logo_image_0", item.logoImageFile);
       formData.append("description", item.description);
       formData.append("product_name", item.productName);
+      if (formCategory) formData.append("category", formCategory);
       formData.append("mode", generationMode);
       formData.append("preferences", JSON.stringify(prefs));
 
@@ -414,6 +416,20 @@ export default function BuildPage() {
                 onChange={(e) => handleLogoUpload(e.target.files?.[0] || null)} />
             </div>
           )}
+        </div>
+
+        {/* ===== 品类（必选）===== */}
+        <div>
+          <h2 className="text-base sm:text-lg font-semibold mb-2">品类 <span className="text-red-400 text-xs ml-1">必选</span></h2>
+          <div className="flex flex-wrap gap-2">
+            {["上衣","裤子","套装","鞋帽","箱包"].map((cat) => (
+              <button key={cat} type="button" onClick={() => setFormCategory(formCategory === cat ? "" : cat)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition
+                  ${formCategory === cat ? "bg-accent text-accent-on border-accent" : "bg-surface text-muted border-border hover:border-accent"}`}
+              >{cat}</button>
+            ))}
+          </div>
+          {!formCategory && <p className="text-xs text-red-400 mt-1">请选择产品品类</p>}
         </div>
 
         {/* ===== 产品名称 ===== */}
