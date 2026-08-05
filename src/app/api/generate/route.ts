@@ -64,9 +64,9 @@ const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/j
 // ===== Agent 启动（被 POST 和 recovery 共用）=====
 
 function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) {
-  const outputDir = workDir;
+  const outputDir = join(workDir, "output");       // 客户交付物放 output/ 子目录
   const indexHtml = join(outputDir, "index.html");
-  const manifestPath = join(outputDir, "image-manifest.json");
+  const manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录
   const logFile = join(workDir, "agent.log");
   const scriptPath = join(workDir, "run.sh");
 
@@ -110,9 +110,9 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
   };
 
   const collectAndFinish = () => {
-    // Agent 可能多写一层 output/ 子目录
+    // 主路径 output/index.html，兼容旧路径根目录 index.html
     const actualIndex = existsSync(indexHtml) ? indexHtml
-      : existsSync(join(outputDir, "output", "index.html")) ? join(outputDir, "output", "index.html")
+      : existsSync(join(workDir, "index.html")) ? join(workDir, "index.html")
       : null;
     if (!actualIndex) return false;
     const actualOutputDir = dirname(actualIndex);
@@ -357,7 +357,8 @@ export async function POST(request: NextRequest) {
         ] : []),
         `【重要规则】`,
         `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
-        `- 把最终产出物（index.html、图片、manifest）全部放到 ${outputDir}/ 下面。`,
+        `- 把最终交付物（index.html、变体HTML、图片）全部放到 ${outputDir}/ 下面。`,
+        `- 把元数据文件（image-manifest.json）放到 ${workDir}/ 下面。`,
         `- HTML 里的图片使用相对路径（如 ./scene_01.png）。`,
         `- 生成完成后直接写入 index.html，不要无限迭代优化。`,
         `- 在 image-manifest.json 中记录每张图使用的 prompt。`,
@@ -435,8 +436,9 @@ export async function GET(request: NextRequest) {
       continue;
     }
 
-    // 如果 index.html 已存在，说明 Agent 已完成，直接标记 done
-    if (existsSync(join(t.workDir, "index.html"))) {
+    // 如果 output/index.html 或 index.html 已存在，说明 Agent 已完成
+    if (existsSync(join(t.workDir, "output", "index.html"))
+        || existsSync(join(t.workDir, "index.html"))) {
       taskStore.remove(t.taskId);
       console.log(`[hermes-cli] ✅ 恢复时发现已完成：${t.workDir}`);
       continue;

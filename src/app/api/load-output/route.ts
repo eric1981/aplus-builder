@@ -18,14 +18,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
 
   try {
+    // 支持 output/ 子目录和根目录两种结构
+    const scanDir = existsSync(join(dirPath, "output")) ? join(dirPath, "output") : dirPath;
+
     // Load HTML
-    const htmlPath = join(dirPath, "index.html");
+    const htmlPath = join(scanDir, "index.html");
     const html = existsSync(htmlPath)
       ? readFileSync(htmlPath, "utf-8")
       : "";
 
     // Load images as base64
-    const files = readdirSync(dirPath);
+    const files = readdirSync(scanDir);
     const imageFiles = files.filter((f) =>
       /\.(jpg|jpeg|png|webp)$/i.test(f),
     );
