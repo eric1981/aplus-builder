@@ -507,7 +507,7 @@ export default function OutputPage() {
           <div>
             <h2 className="text-base sm:text-lg font-semibold mb-3">历史记录（{historyEntries.length}）</h2>
             <div className="space-y-2">
-              {historyEntries.map((entry) => (
+              {[...historyEntries].sort((a, b) => b.timestamp - a.timestamp).map((entry) => (
                 <div key={entry.dirName} className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow group">
                   <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
                     <span className="text-lg">📄</span>
