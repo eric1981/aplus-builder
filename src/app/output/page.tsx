@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { getHistory, loadOutput, rewriteImagePaths, type HistoryEntry, type LoadedOutput } from "../../lib/history";
+import { getHistory, loadOutput, rewriteImagePaths, outputImageUrl, type HistoryEntry, type LoadedOutput } from "../../lib/history";
 import { apiFetch } from "../../lib/apiFetch";
 
 const STORAGE_KEY = "aplus-builder-state";
@@ -511,7 +511,11 @@ export default function OutputPage() {
               {[...historyEntries].sort((a, b) => b.timestamp - a.timestamp).map((entry) => (
                 <div key={entry.dirName} className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow group">
                   <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
-                    <span className="text-lg">📄</span>
+                    {entry.firstImage ? (
+                      <img src={outputImageUrl(entry.firstImage)} loading="lazy" alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-lg">📄</span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{entry.dirName}</p>

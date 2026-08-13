@@ -8,6 +8,8 @@ export interface HistoryEntry {
   timestamp: number;
   imageCount: number;
   variantNames: string[];
+  /** 第一张产出图相对 ~/Downloads/aplus-builder 的路径（用于列表缩略图），无图时为 null */
+  firstImage?: string | null;
 }
 
 export interface LoadedOutput {
@@ -46,6 +48,14 @@ export function rewriteImagePaths(html: string, dirName: string): string {
     (_m, attr, file) =>
       `${attr}="/api/output/${encodeURIComponent(dirName)}/${file}"`,
   );
+}
+
+/**
+ * 把产出文件的相对路径（可能含中文、空格、多级目录）转成 /api/output 的 URL。
+ * 逐段 encodeURIComponent，保证嵌套目录（客户/产品）与特殊字符文件名都能正确请求。
+ */
+export function outputImageUrl(relPath: string): string {
+  return `/api/output/${relPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 // Stubs for backward compatibility

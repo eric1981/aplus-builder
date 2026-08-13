@@ -12,18 +12,19 @@ export async function GET(
 ) {
   const { path } = await params;
 
-  // 防目录遍历：拒绝任何 "."/".."/分隔符/控制字符段
+  // 防目录遍历：拒绝 "."/".." 路径组件、反斜杠、控制字符和以 "/" 开头的绝对段。
+  // 注意：段内允许 "/" —— 嵌套目录（客户/产品）经 encodeURIComponent 后会用 %2F 表示，
+  // Next 解码为含斜杠的单个段；真正的越界由下方的 resolved 前缀校验兜底。
   if (!path || path.length === 0) {
     return new NextResponse("Not found", { status: 404 });
   }
   for (const seg of path) {
     if (
       !seg ||
-      seg === "." ||
-      seg === ".." ||
-      seg.includes("/") ||
+      seg.startsWith("/") ||
       seg.includes("\\") ||
-      seg.includes("\0")
+      seg.includes("\0") ||
+      seg.split("/").some((p) => p === ".." || p === ".")
     ) {
       return new NextResponse("Bad request", { status: 400 });
     }

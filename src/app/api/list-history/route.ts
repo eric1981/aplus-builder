@@ -1,5 +1,5 @@
 import { readdirSync, statSync, existsSync } from "fs";
-import { join } from "path";
+import { join, relative } from "path";
 import { NextResponse } from "next/server";
 
 const OUTPUT_BASE = join(
@@ -17,13 +17,15 @@ function scanDir(absPath: string, prefix: string): {
   imageCount: number;
   variantNames: string[];
   hasHtml: boolean;
+  /** 第一张产出图相对 OUTPUT_BASE 的路径（用于列表缩略图），无图时为 null */
+  firstImage: string | null;
 } | null {
   const hasHtml = existsSync(join(absPath, "output", "index.html"))
     || existsSync(join(absPath, "index.html"));
   if (hasHtml) {
     const scanPath = existsSync(join(absPath, "output")) ? join(absPath, "output") : absPath;
     const files = readdirSync(scanPath);
-    const imageFiles = files.filter((f) => IMAGE_RE.test(f));
+    const imageFiles = files.filter((f) => IMAGE_RE.test(f)).sort();
     const variantFiles = files.filter((f) => VARIANT_RE.test(f)).sort();
     return {
       dirName: prefix,
@@ -31,6 +33,8 @@ function scanDir(absPath: string, prefix: string): {
       imageCount: imageFiles.length,
       variantNames: variantFiles.map((f) => f.replace(".html", "")),
       hasHtml: true,
+      firstImage:
+        imageFiles.length > 0 ? relative(OUTPUT_BASE, join(scanPath, imageFiles[0])) : null,
     };
   }
   return null;
@@ -44,6 +48,7 @@ export async function GET() {
       imageCount: number;
       variantNames: string[];
       hasHtml: boolean;
+      firstImage: string | null;
     }> = [];
 
     if (!existsSync(OUTPUT_BASE)) {
