@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 
 interface CustomerInfo {
   id: string; name: string;
@@ -21,7 +22,7 @@ export default function StyleExtractPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch("/api/customers").then(r => r.json()).then(setCustomers).catch(() => {});
+    apiFetch("/api/customers").then(r => r.json()).then(setCustomers).catch(() => {});
   }, []);
 
   const handleImageUpload = useCallback((file: File | null) => {
@@ -44,7 +45,7 @@ export default function StyleExtractPage() {
       fd.append("requirements", requirements);
       if (assignedCustomer) fd.append("customer_id", assignedCustomer);
 
-      const res = await fetch("/api/style-extract", { method: "POST", body: fd });
+      const res = await apiFetch("/api/style-extract", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "启动失败");
       setTaskId(data.taskId);
@@ -52,7 +53,7 @@ export default function StyleExtractPage() {
       // 轮询
       const poll = setInterval(async () => {
         try {
-          const r = await fetch(`/api/style-extract?taskId=${data.taskId}`);
+          const r = await apiFetch(`/api/style-extract?taskId=${data.taskId}`);
           const t = await r.json();
           if (t.status === "done") {
             clearInterval(poll);
@@ -172,7 +173,7 @@ export default function StyleExtractPage() {
             <details>
               <summary className="text-sm text-muted cursor-pointer hover:text-accent">预览 HTML</summary>
               <div className="mt-2 border border-border rounded-xl overflow-hidden bg-white">
-                <iframe srcDoc={resultHtml} className="w-full" style={{ height: "60vh", minHeight: "400px", border: "none" }} />
+                <iframe srcDoc={resultHtml} sandbox="allow-scripts allow-popups allow-forms" referrerPolicy="no-referrer" className="w-full" style={{ height: "60vh", minHeight: "400px", border: "none" }} />
               </div>
             </details>
           </div>

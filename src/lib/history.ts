@@ -1,6 +1,8 @@
 // Filesystem-based generation history — reads from ~/Downloads/aplus-builder/
 // Replaces the old IndexedDB-based approach. History now mirrors what's on disk.
 
+import { apiFetch } from "./apiFetch";
+
 export interface HistoryEntry {
   dirName: string;
   timestamp: number;
@@ -16,7 +18,7 @@ export interface LoadedOutput {
 
 export async function getHistory(): Promise<HistoryEntry[]> {
   try {
-    const res = await fetch("/api/list-history");
+    const res = await apiFetch("/api/list-history");
     const data = await res.json();
     return data.entries || [];
   } catch {
@@ -26,7 +28,7 @@ export async function getHistory(): Promise<HistoryEntry[]> {
 
 export async function loadOutput(dirName: string): Promise<LoadedOutput | null> {
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/load-output?dir=${encodeURIComponent(dirName)}`,
     );
     if (!res.ok) return null;

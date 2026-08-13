@@ -1,3 +1,18 @@
+# 依赖与构建产物
+node_modules/
+.next/
+out/
+
+# 环境变量（含 LLM API Key 等敏感信息）——严禁提交
+.env
+.env.local
+.env*.local
+
 # 客户档案（含品牌 Logo、模特图、定制模板等敏感数据）
-customers/
-customer-templates/
+# 注意：必须锚定根目录 /customers/，否则会误伤 src/app/api/customers/ 下的 API 代码
+/customers/
+/customer-templates/
+
+# macOS / 构建中间产物
+.DS_Store
+*.tsbuildinfo

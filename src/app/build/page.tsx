@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { getHistory } from "../../lib/history";
+import { apiFetch } from "../../lib/apiFetch";
 import { STYLE_OPTIONS, OD_STYLES, MODEL_OPTIONS, type BuiltinStyle, type ModelPref } from "../../lib/preference-constants";
 
 const STORAGE_KEY = "aplus-builder-state";
@@ -158,7 +159,7 @@ export default function BuildPage() {
 
   // -- 加载客户列表 --
   useEffect(() => {
-    fetch("/api/customers").then((r) => r.json()).then(setCustomers).catch(() => {});
+    apiFetch("/api/customers").then((r) => r.json()).then(setCustomers).catch(() => {});
   }, []);
 
   // -- 选中客户时自动加载资产 + 偏好 --
@@ -167,11 +168,11 @@ export default function BuildPage() {
     const c = customers.find((x) => x.id === selectedCustomerId);
     if (!c) return;
     if (c.logo) {
-      fetch(`/api/customers/assets?id=${c.id}&type=logo`)
+      apiFetch(`/api/customers/assets?id=${c.id}&type=logo`)
         .then((r) => r.json()).then((d) => { if (d.dataUrl) setFormLogoImage(d.dataUrl); }).catch(() => {});
     }
     if (c.modelRef) {
-      fetch(`/api/customers/assets?id=${c.id}&type=model-ref`)
+      apiFetch(`/api/customers/assets?id=${c.id}&type=model-ref`)
         .then((r) => r.json()).then((d) => { if (d.dataUrl) setFormModelImage(d.dataUrl); }).catch(() => {});
     }
     if (c.defaultStyle || c.defaultModel) {
@@ -263,7 +264,7 @@ export default function BuildPage() {
         if (ctx) formData.append("profile_context", ctx);
       }
 
-      const res = await fetch("/api/generate", { method: "POST", body: formData });
+      const res = await apiFetch("/api/generate", { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "启动失败");
 

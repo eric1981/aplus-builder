@@ -3,6 +3,8 @@ import { spawn } from "child_process";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { getCustomer } from "@/lib/customer-store";
+import { validateImageBlob } from "@/lib/upload-validate";
 
 const TEMPLATES_DIR = join(process.cwd(), "customer-templates");
 const TASK_TIMEOUT = 10 * 60 * 1000; // 10 分钟
@@ -16,17 +18,6 @@ type StyleTask = {
 };
 
 const tasks = new Map<string, StyleTask>();
-
-// ===== 读取 customer profile =====
-function getCustomerProfile(customerId: string): { name?: string } | null {
-  try {
-    const profilePath = join(process.cwd(), "customers", customerId, "profile.json");
-    if (!existsSync(profilePath)) return null;
-    return JSON.parse(readFileSync(profilePath, "utf-8"));
-  } catch {
-    return null;
-  }
-}
 
 // ===== POST：创建风格复刻任务 =====
 export async function POST(request: NextRequest) {
@@ -42,21 +33,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "请上传参考截图" }, { status: 400 });
     }
 
+    // 校验截图：大小限制 + magic bytes（customerId 传参不再直接拼路径，见下方 getCustomer）
+    const validated = await validateImageBlob(screenshot);
+    if (!validated) {
+      return NextResponse.json({ error: "截图无效：仅支持 PNG/JPEG/WebP 图片，且不超过 15MB" }, { status: 400 });
+    }
+    const { buffer, ext } = validated;
+
     // 保存截图
     mkdirSync(TEMPLATES_DIR, { recursive: true });
-    const ext = screenshot.type === "image/png" ? "png" : "jpg";
     const screenshotPath = join(TEMPLATES_DIR, `${taskId}_ref.${ext}`);
-    const buffer = Buffer.from(await screenshot.arrayBuffer());
     writeFileSync(screenshotPath, buffer);
 
     const outputPath = join(TEMPLATES_DIR, `${taskId}.html`);
 
-    // 客户信息
+    // 客户信息（经 customer-store 安全读取，杜绝路径穿越）
     let customerHint = "";
     if (customerId) {
-      const profile = getCustomerProfile(customerId);
-      if (profile?.name) {
-        customerHint = `\n这个模板将用于客户「${profile.name}」的后续生成。`;
+      try {
+        const profile = getCustomer(customerId);
+        if (profile?.name) {
+          customerHint = `\n这个模板将用于客户「${profile.name}」的后续生成。`;
+        }
+      } catch {
+        // 非法 customerId 视为无客户信息，不阻断任务
       }
     }
 

@@ -10,8 +10,13 @@ export async function POST(request: NextRequest) {
   try {
     const { html, name } = await request.json() as { html: string; name: string };
 
-    if (!html || !name) {
+    // name 此前直接拼进文件路径，可注入 "../" 造成任意路径写入 —— 改为白名单校验
+    if (!html || typeof name !== "string" || !/^[a-zA-Z0-9_-]{1,60}$/.test(name)) {
       return NextResponse.json({ error: "Missing html or name" }, { status: 400 });
+    }
+    // 限制单次写入的 HTML 体积，防止超大文件写满磁盘
+    if (html.length > 2_000_000) {
+      return NextResponse.json({ error: "html too large" }, { status: 400 });
     }
 
     mkdirSync(GALLERY_DIR, { recursive: true });

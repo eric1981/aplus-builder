@@ -32,6 +32,28 @@ npx next start -p 3000 # 启动（production 模式，ngrok 不支持 WS 所以�
 
 访问 `http://localhost:3000`，首页点「✨ 开始使用」进入生成页。
 
+## 安全说明（重要）
+
+本项目所有 `/api/*` 接口由 `src/proxy.ts` 统一做访问控制：
+
+- **默认（未配置 token）**：仅允许 `localhost` / `127.0.0.1` / `::1` 访问 API；
+  通过局域网/公网 IP 的 API 请求一律返回 401。本地使用体验与之前完全一致。
+- **公网/隧道部署（如 ngrok FRP）必须配置 token**，在 `.env.local` 中同时设置：
+  ```bash
+  AUTH_TOKEN=你的随机token
+  NEXT_PUBLIC_AUTH_TOKEN=你的随机token   # 与上面相同，注入前端请求头
+  ```
+  配置后，非本机 API 请求必须携带 `Authorization: Bearer <token>`（前端自动附带）；
+  `localhost` 访问仍免 token，避免前端漏配时本地功能静默损坏。
+- `/api/output/*` 豁免认证：预览 iframe 内的 `<img>` 无法携带 Authorization 头；
+  该端点经路径校验后只能读取 `~/Downloads/aplus-builder/` 下的产出文件，不含敏感数据。
+
+其他安全加固（2025-08 安全修复）：
+- 客户 ID / 上传文件名 / 历史目录名全部做路径穿越校验（`customer-store.ts`、各 route）
+- 上传图片仅接受 PNG/JPEG/WebP 且 ≤15MB，按文件头（magic bytes）校验，不信任客户端 MIME
+- 预览 iframe 加 `sandbox`，生成的 HTML 无法访问应用同源数据（防存储型 XSS）
+- 所有 API 响应附带 `X-Content-Type-Options: nosniff`
+
 ## 功能
 
 ### 生成模式

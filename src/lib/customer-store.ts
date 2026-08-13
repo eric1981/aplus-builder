@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync } from "fs";
-import { join, extname } from "path";
+import { join, extname, resolve, sep } from "path";
 
 export interface CustomerProfile {
   id: string;
@@ -35,8 +35,42 @@ const CUSTOMERS_DIR = join(process.cwd(), "customers");
 
 function ensureDir() { if (!existsSync(CUSTOMERS_DIR)) mkdirSync(CUSTOMERS_DIR, { recursive: true }); }
 
-function customerDir(id: string) { return join(CUSTOMERS_DIR, id); }
-function profilePath(id: string) { return join(customerDir(id), "profile.json"); }
+// ===== 安全校验 =====
+
+/**
+ * 拒绝可用于路径穿越的客户 ID。
+ * 宽松策略：只拦截会造成目录逃逸的输入（分隔符、相对路径、隐藏目录），
+ * 不强制字符集，避免破坏磁盘上已有的合法目录名。
+ */
+function assertSafeId(id: string): void {
+  if (
+    !id ||
+    id === "." ||
+    id === ".." ||
+    id.startsWith(".") ||
+    id.includes("/") ||
+    id.includes("\\") ||
+    id.includes("\0")
+  ) {
+    throw new Error(`非法客户 ID`);
+  }
+}
+
+/** 断言 target 解析后仍位于 base 之内（防路径越界） */
+function assertInside(base: string, target: string): void {
+  if (!resolve(target).startsWith(resolve(base) + sep)) {
+    throw new Error("路径越界");
+  }
+}
+
+function customerDir(id: string) {
+  assertSafeId(id);
+  return join(CUSTOMERS_DIR, id);
+}
+function profilePath(id: string) {
+  assertSafeId(id);
+  return join(customerDir(id), "profile.json");
+}
 
 // ===== 公开 API =====
 
@@ -81,13 +115,17 @@ export function updateCustomer(id: string, updates: Partial<CustomerProfile>): C
 
 /** 删除客户及其全部数据 */
 export function deleteCustomer(id: string): void {
-  const dir = customerDir(id);
+  const dir = resolve(customerDir(id));
+  assertInside(CUSTOMERS_DIR, dir); // 双保险：即便 ID 校验被绕过也不允许删到 customers/ 之外
   if (existsSync(dir)) rmSync(dir, { recursive: true });
 }
 
 /** 获取客户目录下文件的绝对路径 */
 export function getCustomerFilePath(id: string, filename: string): string | null {
-  const p = join(customerDir(id), filename);
+  if (!filename || filename === "." || filename === "..") return null;
+  if (filename.includes("/") || filename.includes("\\") || filename.includes("\0")) return null;
+  const p = resolve(customerDir(id), filename);
+  assertInside(CUSTOMERS_DIR, p); // 防 logo/modelRef 等字段被注入 "../" 后越界读取
   return existsSync(p) ? p : null;
 }
 

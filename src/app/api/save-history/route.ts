@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeFileSync, mkdirSync } from "fs";
-import { join } from "path";
+import { join, resolve, sep } from "path";
 
-const OUTPUT_BASE = join("/Users", "eric", "Downloads", "aplus-builder");
+const OUTPUT_BASE = resolve(join("/Users", "eric", "Downloads", "aplus-builder"));
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,7 +16,15 @@ export async function POST(request: NextRequest) {
         .replace(/[^a-zA-Z0-9\u4e00-\u9fff\s-]/g, "")
         .replace(/\s+/g, "-")
         .slice(0, 40) || "history";
-      const dir = join(OUTPUT_BASE, `history-${dirName}-${entry.id}`);
+      // entry.id 此前未清洗，可被注入 "../" 造成任意目录写入 —— 这里做与 title 同级的清洗
+      const idPart = String(entry.id ?? "")
+        .replace(/[^a-zA-Z0-9_-]/g, "")
+        .slice(0, 20) || "entry";
+      const dir = join(OUTPUT_BASE, `history-${dirName}-${idPart}`);
+      // 双保险：目录必须在 OUTPUT_BASE 之内
+      if (!resolve(dir).startsWith(OUTPUT_BASE + sep)) {
+        return NextResponse.json({ ok: false, error: "非法路径" }, { status: 400 });
+      }
       mkdirSync(dir, { recursive: true });
 
       let html = entry.html || "";

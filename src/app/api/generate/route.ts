@@ -4,6 +4,7 @@ import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, rea
 import { join, extname, dirname } from "path";
 import { randomUUID } from "crypto";
 import { taskStore, type PersistedTask } from "./task-store";
+import { validateImageBlob } from "@/lib/upload-validate";
 
 const OUTPUT_BASE = join("/Users", "eric", "Downloads", "aplus-builder");
 
@@ -259,27 +260,33 @@ export async function POST(request: NextRequest) {
     // 逐项提取文件（不用 entries() 遍历，避免 Blob instanceof 不可靠）
     const modelImage = formData.get("model_image_0");
     if (modelImage && typeof modelImage === "object" && "arrayBuffer" in modelImage) {
-      const blob = modelImage as Blob;
-      const buffer = Buffer.from(await blob.arrayBuffer());
-      const ext = blob.type === "image/png" ? "png" : "jpg";
+      const validated = await validateImageBlob(modelImage as Blob);
+      if (!validated) {
+        return NextResponse.json({ error: "模特参考图无效：仅支持 PNG/JPEG/WebP，且不超过 15MB" }, { status: 400 });
+      }
+      const { buffer, ext } = validated;
       modelRefPath = join(inputDir, `model_ref.${ext}`);
       writeFileSync(modelRefPath, buffer);
     }
 
     const logoImage = formData.get("logo_image_0");
     if (logoImage && typeof logoImage === "object" && "arrayBuffer" in logoImage) {
-      const blob = logoImage as Blob;
-      const buffer = Buffer.from(await blob.arrayBuffer());
-      const ext = blob.type === "image/png" ? "png" : "jpg";
+      const validated = await validateImageBlob(logoImage as Blob);
+      if (!validated) {
+        return NextResponse.json({ error: "Logo 无效：仅支持 PNG/JPEG/WebP，且不超过 15MB" }, { status: 400 });
+      }
+      const { buffer, ext } = validated;
       logoPath = join(outputDir, `logo.${ext}`);
       writeFileSync(logoPath, buffer);
     }
 
     const productImage = formData.get("image_0");
     if (productImage && typeof productImage === "object" && "arrayBuffer" in productImage) {
-      const blob = productImage as Blob;
-      const buffer = Buffer.from(await blob.arrayBuffer());
-      const ext = blob.type === "image/png" ? "png" : "jpg";
+      const validated = await validateImageBlob(productImage as Blob);
+      if (!validated) {
+        return NextResponse.json({ error: "产品图无效：仅支持 PNG/JPEG/WebP，且不超过 15MB" }, { status: 400 });
+      }
+      const { buffer, ext } = validated;
       imgPath = join(inputDir, `product.${ext}`);
       writeFileSync(imgPath, buffer);
     }

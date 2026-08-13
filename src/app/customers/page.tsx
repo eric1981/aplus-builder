@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { STYLE_OPTIONS, OD_STYLES, MODEL_OPTIONS, type BuiltinStyle, type ModelPref } from "@/lib/preference-constants";
 
 interface Customer {
@@ -40,8 +41,8 @@ export default function CustomersPage() {
   const modelRefRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch("/api/customers").then(r => r.json()).then(setCustomers).catch(() => {});
-    fetch("/api/style-extract/templates").then(r => r.json()).then(d => setTemplates(d.templates || [])).catch(() => {});
+    apiFetch("/api/customers").then(r => r.json()).then(setCustomers).catch(() => {});
+    apiFetch("/api/style-extract/templates").then(r => r.json()).then(d => setTemplates(d.templates || [])).catch(() => {});
   }, []);
 
   const select = (c: Customer) => {
@@ -56,11 +57,11 @@ export default function CustomersPage() {
     setModelUrl("");
     // 加载资产
     if (c.logo) {
-      fetch(`/api/customers/assets?id=${c.id}&type=logo`)
+      apiFetch(`/api/customers/assets?id=${c.id}&type=logo`)
         .then(r => r.json()).then(d => { if (d.dataUrl) setLogoUrl(d.dataUrl); }).catch(() => {});
     }
     if (c.modelRef) {
-      fetch(`/api/customers/assets?id=${c.id}&type=model-ref`)
+      apiFetch(`/api/customers/assets?id=${c.id}&type=model-ref`)
         .then(r => r.json()).then(d => { if (d.dataUrl) setModelUrl(d.dataUrl); }).catch(() => {});
     }
   };
@@ -70,7 +71,7 @@ export default function CustomersPage() {
     setSaving(true);
     setSaved(false);
     try {
-      const res = await fetch("/api/customers", {
+      const res = await apiFetch("/api/customers", {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: selectedId, name: editName.trim(),
@@ -92,14 +93,14 @@ export default function CustomersPage() {
 
   const handleDelete = async () => {
     if (!selectedId || !confirm("确认删除？")) return;
-    await fetch("/api/customers", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: selectedId }) });
+    await apiFetch("/api/customers", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: selectedId }) });
     setCustomers(prev => prev.filter(c => c.id !== selectedId));
     setSelectedId(null);
   };
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    const res = await fetch("/api/customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newName.trim() }) });
+    const res = await apiFetch("/api/customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newName.trim() }) });
     if (res.ok) {
       const created = await res.json();
       setCustomers(prev => [...prev, created]);
@@ -112,7 +113,7 @@ export default function CustomersPage() {
     if (!file || !selectedId) return;
     const fd = new FormData();
     fd.append("logo", file);
-    const res = await fetch(`/api/customers/upload?id=${selectedId}&type=logo`, { method: "POST", body: fd });
+    const res = await apiFetch(`/api/customers/upload?id=${selectedId}&type=logo`, { method: "POST", body: fd });
     if (res.ok) {
       const data = await res.json();
       setCustomers(prev => prev.map(c => c.id === selectedId ? { ...c, logo: data.filename } : c));
@@ -123,7 +124,7 @@ export default function CustomersPage() {
     if (!file || !selectedId) return;
     const fd = new FormData();
     fd.append("model", file);
-    const res = await fetch(`/api/customers/upload?id=${selectedId}&type=model-ref`, { method: "POST", body: fd });
+    const res = await apiFetch(`/api/customers/upload?id=${selectedId}&type=model-ref`, { method: "POST", body: fd });
     if (res.ok) {
       const data = await res.json();
       setCustomers(prev => prev.map(c => c.id === selectedId ? { ...c, modelRef: data.filename } : c));

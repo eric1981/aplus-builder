@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { getHistory, loadOutput, rewriteImagePaths, type HistoryEntry, type LoadedOutput } from "../../lib/history";
+import { apiFetch } from "../../lib/apiFetch";
 
 const STORAGE_KEY = "aplus-builder-state";
 const POLL_INTERVAL = 3000;
@@ -201,7 +202,7 @@ export default function OutputPage() {
 
         for (const qi of active) {
           try {
-            const res = await fetch(`/api/generate?taskId=${qi.taskId}`);
+            const res = await apiFetch(`/api/generate?taskId=${qi.taskId}`);
             const task = await res.json();
 
             if (task.status === "done" && task.html) {
@@ -365,7 +366,7 @@ export default function OutputPage() {
     if (preview.variants.length > 0) items.push({ html: preview.variants[0].html, name: "swiss" });
     if (preview.variants.length > 1) items.push({ html: preview.variants[1].html, name: "product-launch" });
     for (const { html, name } of items) {
-      try { await fetch("/api/capture-gallery", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ html, name }) }); } catch {}
+      try { await apiFetch("/api/capture-gallery", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ html, name }) }); } catch {}
     }
     setCapturing(false);
   };
@@ -428,7 +429,7 @@ export default function OutputPage() {
             <div className="grid lg:grid-cols-5 gap-4 items-start">
               <div className="lg:col-span-3">
                 <div className="border border-border rounded-xl overflow-hidden bg-white shadow-sm">
-                  <iframe srcDoc={responsiveHtml} className="w-full" style={{ height: "85vh", minHeight: "600px", border: "none" }} title="预览" />
+                  <iframe srcDoc={responsiveHtml} sandbox="allow-scripts allow-popups allow-forms" referrerPolicy="no-referrer" className="w-full" style={{ height: "85vh", minHeight: "600px", border: "none" }} title="预览" />
                 </div>
               </div>
               {(preview.images?.length || 0) > 0 && (

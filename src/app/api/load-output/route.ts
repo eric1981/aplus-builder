@@ -1,11 +1,9 @@
 import { readFileSync, readdirSync, existsSync } from "fs";
-import { join } from "path";
+import { join, resolve, sep } from "path";
 import { NextRequest, NextResponse } from "next/server";
 
-const OUTPUT_BASE = join(
-  process.env.HOME || "/Users/eric",
-  "Downloads",
-  "aplus-builder",
+const OUTPUT_BASE = resolve(
+  join(process.env.HOME || "/Users/eric", "Downloads", "aplus-builder"),
 );
 
 export async function GET(req: NextRequest) {
@@ -13,7 +11,23 @@ export async function GET(req: NextRequest) {
   if (!dirName)
     return NextResponse.json({ error: "dir required" }, { status: 400 });
 
-  const dirPath = join(OUTPUT_BASE, dirName);
+  // 防目录遍历：dirName 允许含 "/"（客户/产品两级目录），但拒绝空段、"."、".." 和隐藏目录
+  const parts = dirName.split("/");
+  if (
+    parts.length === 0 ||
+    parts.some((p) => !p || p === "." || p === ".." || p.includes("\\") || p.includes("\0")) ||
+    parts[0].startsWith(".")
+  ) {
+    return NextResponse.json({ error: "非法目录名" }, { status: 400 });
+  }
+
+  const dirPath = resolve(join(OUTPUT_BASE, dirName));
+
+  // 双保险：解析后的路径必须仍在 OUTPUT_BASE 之内
+  if (!dirPath.startsWith(OUTPUT_BASE + sep)) {
+    return NextResponse.json({ error: "非法目录名" }, { status: 400 });
+  }
+
   if (!existsSync(dirPath))
     return NextResponse.json({ error: "not found" }, { status: 404 });
 
