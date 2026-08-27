@@ -13,6 +13,9 @@ out/
 /customers/
 /customer-templates/
 
+# 运行时数据（任务持久化 data/tasks.json、配额 data/quota.json）
+/data/
+
 # macOS / 构建中间产物
 .DS_Store
 *.tsbuildinfo

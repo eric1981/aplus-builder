@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn, spawnSync } from "child_process";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync, renameSync } from "fs";
 import { join, extname, dirname } from "path";
 import { randomUUID } from "crypto";
 import { taskStore, type PersistedTask } from "./task-store";
 import { validateImageBlob } from "@/lib/upload-validate";
+import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
 
 const OUTPUT_BASE = join("/Users", "eric", "Downloads", "aplus-builder");
 
@@ -35,9 +36,20 @@ type Task = {
 const tasks = new Map<string, Task>();
 const AGENT_TIMEOUT = 20 * 60 * 1000;
 const MAX_CONCURRENT = 2;
+/** 排队上限（成本保护）：超过即 429 */
+const MAX_QUEUE = parseInt(process.env.MAX_QUEUE || "20", 10) || 20;
+/** Agent 失败自动重试上限（含首次启动） */
+const MAX_AGENT_ATTEMPTS = parseInt(process.env.MAX_AGENT_ATTEMPTS || "2", 10) || 1;
+/** 是否允许 agent 联网（--source web）；AGENT_SOURCE=none 可关闭 */
+const AGENT_SOURCE_WEB = (process.env.AGENT_SOURCE || "web") !== "none";
 
 let activeCount = 0;
 const queue: { taskId: string; startFn: () => void }[] = [];
+
+/** 运行中任务的子进程句柄（用于取消） */
+const children = new Map<string, ChildProcess>();
+/** 已取消的任务（不再自动重试） */
+const canceled = new Set<string>();
 
 function updateQueuePositions() {
   for (const { taskId } of queue) {
@@ -86,6 +98,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
     env: { ...process.env, HOME: "/Users/eric" },
     cwd: "/Users/eric",
   });
+  children.set(taskId, child);
 
   let logBuffer = "";
   let settled = false;
@@ -93,6 +106,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
   const finalize = (status: "done" | "error", html?: string, errMsg?: string, images?: TaskImage[], signal?: string, variants?: { name: string; html: string }[], productName?: string) => {
     if (settled) return;
     settled = true;
+    children.delete(taskId);
     tasks.set(taskId, { status, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
     taskStore.remove(taskId);
     releaseSlot();
@@ -210,14 +224,38 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
 
   child.on("close", (code) => {
     clearTimeout(timer);
+    children.delete(taskId);
     console.log(`[hermes-cli] Task ${taskId} exited code=${code}`);
     if (collectAndFinish()) return;
+
     const htmlMatch = logBuffer.match(/```html?\s*\n?([\s\S]*?)```/);
-    if (htmlMatch) { finalize("done", htmlMatch[1].trim()); }
-    else { finalize("error", undefined, `Agent 退出码 ${code}`); }
+
+    // 用户已取消：不再重试
+    if (canceled.has(taskId)) {
+      canceled.delete(taskId);
+      finalize("error", undefined, "任务已取消");
+      return;
+    }
+
+    // 日志中直接输出了 HTML（agent 兜底路径）→ 视为成功
+    if (htmlMatch) { finalize("done", htmlMatch[1].trim()); return; }
+
+    // 自动重试：Agent 异常退出且未超过上限时，重新入队（占用新槽位）
+    const record = taskStore.get(taskId);
+    const attempts = record?.attempts || 1;
+    if (code !== 0 && attempts < MAX_AGENT_ATTEMPTS) {
+      console.log(`[hermes-cli] Task ${taskId} 失败（exit=${code}），自动重试 ${attempts}/${MAX_AGENT_ATTEMPTS}`);
+      taskStore.bumpAttempts(taskId);
+      tasks.set(taskId, { status: "queued", log: logBuffer.slice(-2000) });
+      queue.unshift({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId) }); // 重试优先
+      releaseSlot(); // 释放槽位 → tryProcessQueue 立即拉起重试
+      return;
+    }
+
+    finalize("error", undefined, `Agent 退出码 ${code}`);
   });
 
-  child.on("error", (err) => { clearTimeout(timer); finalize("error", undefined, err.message); });
+  child.on("error", (err) => { clearTimeout(timer); children.delete(taskId); finalize("error", undefined, err.message); });
 }
 
 // ===== POST：创建任务 =====
@@ -225,8 +263,18 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
 export async function POST(request: NextRequest) {
   const taskId = randomUUID();
 
+  // 稳定性 P0：限流（成本保护，昂贵的写接口）
+  if (!checkRateLimit(clientIp(request.headers))) {
+    return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
+  }
+
   try {
-    const formData = await request.formData();
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
+    }
 
     let imgPath = "";
     let modelRefPath = "";
@@ -432,10 +480,24 @@ export async function POST(request: NextRequest) {
       `cd /Users/eric`,
       `hermes -p duma -s ecommerce-aplus-detail chat \\`,
       `  -q "$(cat '${promptFile}')" \\`,
-      `  --quiet --yolo --max-turns 90 --source web`,
+      `  --quiet --yolo --max-turns 90${AGENT_SOURCE_WEB ? " --source web" : ""}`,
     ].join("\n");
     const scriptPath = join(workDir, "run.sh");
     writeFileSync(scriptPath, script, { mode: 0o755 });
+
+    // 队列上限检查（先于配额，避免满队列时白烧配额）
+    if (activeCount >= MAX_CONCURRENT && queue.length >= MAX_QUEUE) {
+      return NextResponse.json(
+        { error: `任务队列已满（最多 ${MAX_QUEUE} 个排队），请稍后再试` },
+        { status: 429 },
+      );
+    }
+
+    // 稳定性 P0：配额（日/月成本熔断）——仅在任务校验通过、即将创建时消耗
+    const quota = consumeQuota();
+    if (!quota.ok) {
+      return NextResponse.json({ error: quota.reason }, { status: 429 });
+    }
 
     // 持久化任务元数据
     taskStore.add({
@@ -445,6 +507,7 @@ export async function POST(request: NextRequest) {
       workDir,
       mode,
       customTemplateId: customTemplateId || undefined,
+      attempts: 1,
       createdAt: Date.now(),
     });
 
@@ -476,6 +539,35 @@ export async function GET(request: NextRequest) {
     for (let i = 0; i < keys.length - 100; i++) tasks.delete(keys[i]);
   }
   return NextResponse.json(task);
+}
+
+// ===== 取消任务（稳定性 P0：用户可取消排队/运行中任务）=====
+
+export async function DELETE(request: NextRequest) {
+  const taskId = request.nextUrl.searchParams.get("taskId");
+  if (!taskId) return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
+  const task = tasks.get(taskId);
+  if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+
+  if (task.status === "queued") {
+    // 从排队队列移除
+    const idx = queue.findIndex((q) => q.taskId === taskId);
+    if (idx !== -1) queue.splice(idx, 1);
+    tasks.set(taskId, { status: "error", error: "任务已取消", log: task.log });
+    taskStore.remove(taskId);
+    return NextResponse.json({ ok: true, canceled: true });
+  }
+
+  if (task.status === "running") {
+    canceled.add(taskId);
+    const child = children.get(taskId);
+    if (child) child.kill("SIGTERM");
+    // 状态由 close 回调最终确定（若此时已产出则标记完成，否则"已取消"）
+    return NextResponse.json({ ok: true, canceling: true });
+  }
+
+  // done / error 无可取消
+  return NextResponse.json({ ok: true, canceled: false });
 }
 
 // ===== 启动时恢复中断任务 =====

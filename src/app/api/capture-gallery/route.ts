@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { spawnSync } from "child_process";
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { checkRateLimit, clientIp } from "@/lib/limits";
 
 const GALLERY_DIR = join(process.cwd(), "public", "gallery");
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 export async function POST(request: NextRequest) {
+  // 稳定性 P0：限流（Chrome 截图是同步阻塞操作，必须限流）
+  if (!checkRateLimit(clientIp(request.headers))) {
+    return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
+  }
+
   try {
     const { html, name } = await request.json() as { html: string; name: string };
 

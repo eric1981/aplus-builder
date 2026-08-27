@@ -274,6 +274,26 @@ export default function OutputPage() {
     setQueueItems((prev) => prev.filter((q) => q.id !== id));
   };
 
+  // -- 取消任务（稳定性 P0：排队/运行中任务可取消）--
+  const [cancelingIds, setCancelingIds] = useState<Set<string>>(new Set());
+
+  const cancelTask = async (qi: QueueItem) => {
+    if (!qi.taskId || cancelingIds.has(qi.id)) return;
+    setCancelingIds((prev) => new Set(prev).add(qi.id));
+    try {
+      const res = await apiFetch(`/api/generate?taskId=${qi.taskId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.canceled) {
+        // 排队任务已被服务端移除 → 本地标记为已取消（退出轮询）
+        setQueueItems((prev) =>
+          prev.map((p) => (p.id === qi.id ? { ...p, status: "error", error: "已取消" } : p))
+        );
+      }
+      // 运行中任务保持轮询，等待服务端最终状态（完成或"任务已取消"）
+    } catch {}
+    setCancelingIds((prev) => { const s = new Set(prev); s.delete(qi.id); return s; });
+  };
+
   // -- 下载 --
   const handleDownloadHtml = () => {
     const html = preview?.html;
@@ -471,6 +491,10 @@ export default function OutputPage() {
                 }`}>
                   <span>{qi.status === "running" ? "🔵" : "⏳"}</span>
                   <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || qi.id.slice(-8)}</span>
+                  {qi.taskId && (
+                    <button onClick={() => cancelTask(qi)} disabled={cancelingIds.has(qi.id)}
+                      className="px-2 py-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-40">取消</button>
+                  )}
                 </div>
               ))}
               {errorItems.map((qi) => (

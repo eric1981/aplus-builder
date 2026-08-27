@@ -5,9 +5,14 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import { getCustomer } from "@/lib/customer-store";
 import { validateImageBlob } from "@/lib/upload-validate";
+import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
 
 const TEMPLATES_DIR = join(process.cwd(), "customer-templates");
 const TASK_TIMEOUT = 10 * 60 * 1000; // 10 分钟
+/** 风格复刻并发上限（成本保护） */
+const MAX_STYLE_CONCURRENT = parseInt(process.env.MAX_STYLE_CONCURRENT || "2", 10) || 1;
+/** 是否允许 agent 联网（AGENT_SOURCE=none 关闭） */
+const AGENT_SOURCE_WEB = (process.env.AGENT_SOURCE || "web") !== "none";
 
 type StyleTask = {
   status: "running" | "done" | "error";
@@ -18,13 +23,27 @@ type StyleTask = {
 };
 
 const tasks = new Map<string, StyleTask>();
+let activeStyleCount = 0;
 
 // ===== POST：创建风格复刻任务 =====
 export async function POST(request: NextRequest) {
   const taskId = randomUUID();
 
+  // 稳定性 P0：限流 + 并发上限
+  if (!checkRateLimit(clientIp(request.headers))) {
+    return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
+  }
+  if (activeStyleCount >= MAX_STYLE_CONCURRENT) {
+    return NextResponse.json({ error: `风格复刻并发已达上限（${MAX_STYLE_CONCURRENT}），请稍后再试` }, { status: 429 });
+  }
+
   try {
-    const formData = await request.formData();
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
+    }
     const screenshot = formData.get("screenshot") as Blob | null;
     const requirements = (formData.get("requirements") as string) || "";
     const customerId = (formData.get("customer_id") as string) || "";
@@ -39,6 +58,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "截图无效：仅支持 PNG/JPEG/WebP 图片，且不超过 15MB" }, { status: 400 });
     }
     const { buffer, ext } = validated;
+
+    // 稳定性 P0：配额（日/月成本熔断）——校验通过后才消耗
+    const quota = consumeQuota();
+    if (!quota.ok) {
+      return NextResponse.json({ error: quota.reason }, { status: 429 });
+    }
 
     // 保存截图
     mkdirSync(TEMPLATES_DIR, { recursive: true });
@@ -91,7 +116,7 @@ export async function POST(request: NextRequest) {
       `cd /Users/eric`,
       `~/.hermes/hermes-agent/venv/bin/hermes -p duma -s aplus-style-creator chat \\`,
       `  -q "$(cat '${promptFile}')" \\`,
-      `  --quiet --yolo --max-turns 60 --source web`,
+      `  --quiet --yolo --max-turns 60${AGENT_SOURCE_WEB ? " --source web" : ""}`,
     ].join("\n");
 
     const scriptPath = join(TEMPLATES_DIR, `${taskId}_run.sh`);
@@ -100,6 +125,7 @@ export async function POST(request: NextRequest) {
     // 启动 agent
     const logFile = join(TEMPLATES_DIR, `${taskId}_agent.log`);
     tasks.set(taskId, { status: "running", log: "" });
+    activeStyleCount++;
 
     let settled = false;
     let logBuffer = "";
@@ -116,6 +142,7 @@ export async function POST(request: NextRequest) {
     const finalize = (status: "done" | "error", html?: string, errMsg?: string) => {
       if (settled) return;
       settled = true;
+      activeStyleCount = Math.max(0, activeStyleCount - 1);
       tasks.set(taskId, { status, templateId: taskId, html, error: errMsg, log: logBuffer.slice(-5000) });
     };
 

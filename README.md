@@ -54,6 +54,26 @@ npx next start -p 3000 # 启动（production 模式，ngrok 不支持 WS 所以�
 - 预览 iframe 加 `sandbox`，生成的 HTML 无法访问应用同源数据（防存储型 XSS）
 - 所有 API 响应附带 `X-Content-Type-Options: nosniff`
 
+## 稳定性保护（对外开放 P0）
+
+对外公开前必须启用的成本/稳定性护栏（环境变量，默认值已兼容本地单用户）：
+
+| 环境变量 | 默认 | 作用 |
+|---|---|---|
+| `AUTH_TOKEN` / `NEXT_PUBLIC_AUTH_TOKEN` | 空 | 远程访问认证（见上） |
+| `MAX_DAILY_TASKS` | 200 | 每日任务配额（成本熔断，耗尽返回 429） |
+| `MAX_MONTHLY_TASKS` | 2000 | 每月任务配额 |
+| `RATE_LIMIT_PER_MINUTE` | 30 | 昂贵写接口（生成/风格复刻/截图）每分钟限次 |
+| `MAX_QUEUE` | 20 | 生成任务排队上限（满返回 429） |
+| `MAX_AGENT_ATTEMPTS` | 2 | Agent 失败自动重试上限（含首次） |
+| `MAX_STYLE_CONCURRENT` | 2 | 风格复刻并发上限 |
+| `AGENT_SOURCE` | `web` | 设为 `none` 可关闭 agent 联网（`--source web`） |
+
+配套能力：
+- **任务可取消**：`DELETE /api/generate?taskId=...`（排队任务直接移除，运行中任务终止 Agent），前端「产出中心」队列项有「取消」按钮
+- **任务持久化**：任务元数据从 `/tmp` 迁移到 `<项目>/data/tasks.json`（原子写入），服务重启自动恢复；配额计数存 `data/quota.json`
+- **内容审核（合规待办）**：当前未接入外部内容审核服务，公开运营前需自行接入（生成内容含模特图，涉及肖像/版权合规）
+
 ## 功能
 
 ### 生成模式
