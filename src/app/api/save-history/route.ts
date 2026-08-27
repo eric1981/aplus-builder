@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeFileSync, mkdirSync } from "fs";
 import { join, resolve, sep } from "path";
-
-const OUTPUT_BASE = resolve(join("/Users", "eric", "Downloads", "aplus-builder"));
+import { userBase } from "@/lib/config";
 
 export async function POST(request: NextRequest) {
   try {
     const entries = await request.json();
-    mkdirSync(OUTPUT_BASE, { recursive: true });
+    const base = userBase(request.headers.get("x-user-id") || "admin");
+    mkdirSync(base, { recursive: true });
 
     let totalImages = 0;
 
@@ -20,9 +20,9 @@ export async function POST(request: NextRequest) {
       const idPart = String(entry.id ?? "")
         .replace(/[^a-zA-Z0-9_-]/g, "")
         .slice(0, 20) || "entry";
-      const dir = join(OUTPUT_BASE, `history-${dirName}-${idPart}`);
-      // 双保险：目录必须在 OUTPUT_BASE 之内
-      if (!resolve(dir).startsWith(OUTPUT_BASE + sep)) {
+      const dir = join(base, `history-${dirName}-${idPart}`);
+      // 双保险：目录必须在 base 之内
+      if (!resolve(dir).startsWith(base + sep)) {
         return NextResponse.json({ ok: false, error: "非法路径" }, { status: 400 });
       }
       mkdirSync(dir, { recursive: true });

@@ -54,25 +54,39 @@ npx next start -p 3000 # 启动（production 模式，ngrok 不支持 WS 所以�
 - 预览 iframe 加 `sandbox`，生成的 HTML 无法访问应用同源数据（防存储型 XSS）
 - 所有 API 响应附带 `X-Content-Type-Options: nosniff`
 
-## 稳定性保护（对外开放 P0）
+## 稳定性保护（对外开放 P0+P1）
 
 对外公开前必须启用的成本/稳定性护栏（环境变量，默认值已兼容本地单用户）：
 
 | 环境变量 | 默认 | 作用 |
 |---|---|---|
-| `AUTH_TOKEN` / `NEXT_PUBLIC_AUTH_TOKEN` | 空 | 远程访问认证（见上） |
+| `AUTH_USERS` | 空 | 多用户注册表种子（JSON 数组，见下） |
+| `AUTH_TOKEN` / `NEXT_PUBLIC_AUTH_TOKEN` | 空 | 旧版单 token 认证（等价 admin） |
 | `MAX_DAILY_TASKS` | 200 | 每日任务配额（成本熔断，耗尽返回 429） |
 | `MAX_MONTHLY_TASKS` | 2000 | 每月任务配额 |
 | `RATE_LIMIT_PER_MINUTE` | 30 | 昂贵写接口（生成/风格复刻/截图）每分钟限次 |
 | `MAX_QUEUE` | 20 | 生成任务排队上限（满返回 429） |
 | `MAX_AGENT_ATTEMPTS` | 2 | Agent 失败自动重试上限（含首次） |
 | `MAX_STYLE_CONCURRENT` | 2 | 风格复刻并发上限 |
+| `MAX_SCREENSHOT_CONCURRENT` | 2 | Chrome 截图并发上限 |
 | `AGENT_SOURCE` | `web` | 设为 `none` 可关闭 agent 联网（`--source web`） |
+| `AGENT_TIMEOUT_MINUTES` / `STYLE_TIMEOUT_MINUTES` | 20 / 10 | Agent 超时（超时阶梯第一步：分接口配置） |
+| `OUTPUT_BASE` | `~/Downloads/aplus-builder` | 产出根目录 |
+| `AGENT_HOME` | 当前用户主目录 | Agent 进程 HOME/cwd |
+| `CHROME_PATH` | macOS Chrome | 截图浏览器路径 |
 
 配套能力：
 - **任务可取消**：`DELETE /api/generate?taskId=...`（排队任务直接移除，运行中任务终止 Agent），前端「产出中心」队列项有「取消」按钮
-- **任务持久化**：任务元数据从 `/tmp` 迁移到 `<项目>/data/tasks.json`（原子写入），服务重启自动恢复；配额计数存 `data/quota.json`
+- **任务持久化**：任务元数据存 `<项目>/data/tasks.json`（原子写入），服务重启自动恢复；配额计数存 `data/quota.json`
+- **多用户隔离（P1）**：`AUTH_USERS='[{"id":"alice","name":"Alice","token":"tk_xxx"},...]'` 定义用户；各用户 Bearer token 经 proxy 解析后，客户档案/产出/历史按用户隔离存储：
+  - `admin`（本机访问/旧 AUTH_TOKEN）→ 沿用旧布局 `customers/`、`~/Downloads/aplus-builder/`
+  - 其他用户 → `~/Downloads/aplus-builder/<userId>/...`（含 `customers/` 子目录）
+  - 用户注册表落盘 `data/users.json`，可手动增删用户
+- **审计日志（P1）**：关键操作（任务创建/完成/取消、客户增删改、上传）追加写入 `data/audit.log`（JSONL）
+- **Chrome 截图异步化（P1）**：截图改为异步 spawn + 并发池，不再阻塞事件循环
 - **内容审核（合规待办）**：当前未接入外部内容审核服务，公开运营前需自行接入（生成内容含模特图，涉及肖像/版权合规）
+
+> 已知限制：`/api/output`（预览图片加载）对 iframe 免认证，非 admin 用户的历史预览图需后续引入 cookie 会话才能按用户隔离加载。
 
 ## 功能
 

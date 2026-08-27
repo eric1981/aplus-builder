@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnSync } from "child_process";
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { checkRateLimit, clientIp } from "@/lib/limits";
+import { screenshotPage } from "@/lib/screenshot";
 
 const GALLERY_DIR = join(process.cwd(), "public", "gallery");
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 export async function POST(request: NextRequest) {
-  // 稳定性 P0：限流（Chrome 截图是同步阻塞操作，必须限流）
+  // 稳定性 P0：限流（截图走 Chrome，必须限流）
   if (!checkRateLimit(clientIp(request.headers))) {
     return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
   }
@@ -31,19 +30,12 @@ export async function POST(request: NextRequest) {
     const tmpHtml = join(GALLERY_DIR, `${name}.html`);
     writeFileSync(tmpHtml, html, "utf-8");
 
-    // Screenshot with Chrome headless
+    // Screenshot with Chrome headless（异步，不阻塞事件循环）
     const destPath = join(GALLERY_DIR, `${name}.png`);
-    const result = spawnSync(CHROME, [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-sandbox",
-      `--screenshot=${destPath}`,
-      "--window-size=450,800",
-      `file://${tmpHtml}`,
-    ], { timeout: 15000 });
+    const ok = await screenshotPage({ htmlPath: tmpHtml, destPath });
 
-    if (result.error) {
-      return NextResponse.json({ error: result.error.message }, { status: 500 });
+    if (!ok) {
+      return NextResponse.json({ error: "Chrome 截图失败" }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, path: `/gallery/${name}.png` });

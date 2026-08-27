@@ -6,9 +6,10 @@ import { randomUUID } from "crypto";
 import { getCustomer } from "@/lib/customer-store";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
+import { AGENT_HOME, OUTPUT_BASE, STYLE_TIMEOUT_MS } from "@/lib/config";
+import { logAudit } from "@/lib/audit";
 
 const TEMPLATES_DIR = join(process.cwd(), "customer-templates");
-const TASK_TIMEOUT = 10 * 60 * 1000; // 10 分钟
 /** 风格复刻并发上限（成本保护） */
 const MAX_STYLE_CONCURRENT = parseInt(process.env.MAX_STYLE_CONCURRENT || "2", 10) || 1;
 /** 是否允许 agent 联网（AGENT_SOURCE=none 关闭） */
@@ -28,6 +29,7 @@ let activeStyleCount = 0;
 // ===== POST：创建风格复刻任务 =====
 export async function POST(request: NextRequest) {
   const taskId = randomUUID();
+  const userId = request.headers.get("x-user-id") || "admin";
 
   // 稳定性 P0：限流 + 并发上限
   if (!checkRateLimit(clientIp(request.headers))) {
@@ -76,7 +78,7 @@ export async function POST(request: NextRequest) {
     let customerHint = "";
     if (customerId) {
       try {
-        const profile = getCustomer(customerId);
+        const profile = getCustomer(customerId, userId);
         if (profile?.name) {
           customerHint = `\n这个模板将用于客户「${profile.name}」的后续生成。`;
         }
@@ -97,7 +99,7 @@ export async function POST(request: NextRequest) {
       `请完成以下操作：`,
       `1. 视觉反推：分析截图的配色、字体、间距、排版、模块结构`,
       `2. 创建风格模板：构建完整可复用的 HTML/CSS 模板`,
-      `3. 用刚刚创建的风格模板生成一个完整的 HTML 文件，需要的示例图片从 /Users/eric/Downloads/aplus-builder 目录获取`,
+      `3. 用刚刚创建的风格模板生成一个完整的 HTML 文件，需要的示例图片从 ${OUTPUT_BASE} 目录获取`,
       `4. 将 HTML 文件保存到：${outputPath}`,
       ``,
       `【重要规则】`,
@@ -132,8 +134,8 @@ export async function POST(request: NextRequest) {
 
     const child = spawn("/bin/bash", [scriptPath], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HOME: "/Users/eric" },
-      cwd: "/Users/eric",
+      env: { ...process.env, HOME: AGENT_HOME },
+      cwd: AGENT_HOME,
     });
 
     child.stdout.on("data", (d: Buffer) => { logBuffer += d.toString(); appendFileSync(logFile, d); });
@@ -144,12 +146,13 @@ export async function POST(request: NextRequest) {
       settled = true;
       activeStyleCount = Math.max(0, activeStyleCount - 1);
       tasks.set(taskId, { status, templateId: taskId, html, error: errMsg, log: logBuffer.slice(-5000) });
+      logAudit(userId, status === "done" ? "style.done" : "style.error", { taskId, error: errMsg });
     };
 
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
-      if (!settled) finalize("error", undefined, "Agent 超时（10 分钟）");
-    }, TASK_TIMEOUT);
+      if (!settled) finalize("error", undefined, "Agent 超时");
+    }, STYLE_TIMEOUT_MS);
 
     child.on("close", (code) => {
       clearTimeout(timer);

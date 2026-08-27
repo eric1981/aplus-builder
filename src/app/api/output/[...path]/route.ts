@@ -1,16 +1,15 @@
 import { readFileSync, existsSync } from "fs";
 import { join, resolve, sep } from "path";
 import { NextRequest, NextResponse } from "next/server";
-
-const OUTPUT_BASE = resolve(
-  join(process.env.HOME || "/Users/eric", "Downloads", "aplus-builder"),
-);
+import { userBase } from "@/lib/config";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
+  // 多用户隔离：x-user-id 由 proxy 注入；无则视为 admin（本地默认布局）
+  const base = userBase(req.headers.get("x-user-id") || "admin");
 
   // 防目录遍历：拒绝 "."/".." 路径组件、反斜杠、控制字符和以 "/" 开头的绝对段。
   // 注意：段内允许 "/" —— 嵌套目录（客户/产品）经 encodeURIComponent 后会用 %2F 表示，
@@ -30,10 +29,10 @@ export async function GET(
     }
   }
 
-  const filePath = resolve(join(OUTPUT_BASE, ...path));
+  const filePath = resolve(join(base, ...path));
 
-  // 双保险：解析后的路径必须仍在 OUTPUT_BASE 之内
-  if (!filePath.startsWith(OUTPUT_BASE + sep)) {
+  // 双保险：解析后的路径必须仍在 base 之内
+  if (!filePath.startsWith(base + sep)) {
     return new NextResponse("Bad request", { status: 400 });
   }
 

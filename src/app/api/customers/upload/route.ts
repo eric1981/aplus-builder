@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCustomer, updateCustomer } from "@/lib/customer-store";
-import { writeFileSync, existsSync, mkdirSync } from "fs";
+import { getCustomer, getCustomerDir, updateCustomer } from "@/lib/customer-store";
+import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { validateImageBlob } from "@/lib/upload-validate";
-
-const CUSTOMERS_DIR = join(process.cwd(), "customers");
+import { logAudit } from "@/lib/audit";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "未知错误";
@@ -13,10 +12,11 @@ function errMsg(e: unknown): string {
 /**
  * POST /api/customers/upload
  * Body: FormData with fields: id, type ("logo"|"model-ref"), file
- * Saves the file to customers/<id>/<filename> and updates profile.json
+ * Saves the file to <用户客户目录>/<filename> and updates profile.json
  */
 export async function POST(request: NextRequest) {
   try {
+    const userId = request.headers.get("x-user-id") || "admin";
     const formData = await request.formData();
     const id = formData.get("id") as string;
     const type = formData.get("type") as string; // "logo" or "model-ref"
@@ -30,13 +30,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "type must be 'logo' or 'model-ref'" }, { status: 400 });
     }
 
-    const profile = getCustomer(id);
+    const profile = getCustomer(id, userId);
     if (!profile) {
       return NextResponse.json({ error: "客户不存在" }, { status: 404 });
     }
 
-    const customerDir = join(CUSTOMERS_DIR, id);
-    if (!existsSync(customerDir)) mkdirSync(customerDir, { recursive: true });
+    const customerDir = getCustomerDir(id, userId);
+    mkdirSync(customerDir, { recursive: true });
 
     // 校验：大小限制 + 按文件真实内容（magic bytes）判断格式，不信任客户端声明的 MIME
     const validated = await validateImageBlob(file);
@@ -56,7 +56,8 @@ export async function POST(request: NextRequest) {
     const updates: Partial<{ logo: string; modelRef: string }> = {};
     if (type === "logo") updates.logo = filename;
     else updates.modelRef = filename;
-    const updated = updateCustomer(id, updates);
+    const updated = updateCustomer(id, updates, userId);
+    logAudit(userId, "customer.upload", { id, type, filename });
 
     return NextResponse.json({ ok: true, profile: updated });
   } catch (e) {

@@ -1,23 +1,18 @@
 import { readdirSync, statSync, existsSync } from "fs";
 import { join, relative } from "path";
-import { NextResponse } from "next/server";
-
-const OUTPUT_BASE = join(
-  process.env.HOME || "/Users/eric",
-  "Downloads",
-  "aplus-builder",
-);
+import { NextRequest, NextResponse } from "next/server";
+import { userBase } from "@/lib/config";
 
 const IMAGE_RE = /\.(jpg|jpeg|png|webp)$/i;
 const VARIANT_RE = /^variant_\d+\.html$/;
 
-function scanDir(absPath: string, prefix: string): {
+function scanDir(absPath: string, prefix: string, base: string): {
   dirName: string;
   timestamp: number;
   imageCount: number;
   variantNames: string[];
   hasHtml: boolean;
-  /** 第一张产出图相对 OUTPUT_BASE 的路径（用于列表缩略图），无图时为 null */
+  /** 第一张产出图相对 base 的路径（用于列表缩略图），无图时为 null */
   firstImage: string | null;
 } | null {
   const hasHtml = existsSync(join(absPath, "output", "index.html"))
@@ -34,14 +29,15 @@ function scanDir(absPath: string, prefix: string): {
       variantNames: variantFiles.map((f) => f.replace(".html", "")),
       hasHtml: true,
       firstImage:
-        imageFiles.length > 0 ? relative(OUTPUT_BASE, join(scanPath, imageFiles[0])) : null,
+        imageFiles.length > 0 ? relative(base, join(scanPath, imageFiles[0])) : null,
     };
   }
   return null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const base = userBase(request.headers.get("x-user-id") || "admin");
     const entries: Array<{
       dirName: string;
       timestamp: number;
@@ -51,18 +47,18 @@ export async function GET() {
       firstImage: string | null;
     }> = [];
 
-    if (!existsSync(OUTPUT_BASE)) {
+    if (!existsSync(base)) {
       return NextResponse.json({ entries: [] });
     }
 
-    const topLevel = readdirSync(OUTPUT_BASE, { withFileTypes: true });
+    const topLevel = readdirSync(base, { withFileTypes: true });
 
     for (const entry of topLevel) {
       if (!entry.isDirectory()) continue;
-      const topPath = join(OUTPUT_BASE, entry.name);
+      const topPath = join(base, entry.name);
 
       // 老格式：一级目录就是产品目录
-      const product = scanDir(topPath, entry.name);
+      const product = scanDir(topPath, entry.name, base);
       if (product) {
         entries.push(product);
         continue;
@@ -73,7 +69,7 @@ export async function GET() {
       for (const sub of subDirs) {
         if (!sub.isDirectory()) continue;
         const subPath = join(topPath, sub.name);
-        const item = scanDir(subPath, `${entry.name}/${sub.name}`);
+        const item = scanDir(subPath, `${entry.name}/${sub.name}`, base);
         if (item) entries.push(item);
       }
     }

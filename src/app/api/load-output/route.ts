@@ -1,15 +1,14 @@
 import { readFileSync, readdirSync, existsSync } from "fs";
 import { join, resolve, sep } from "path";
 import { NextRequest, NextResponse } from "next/server";
-
-const OUTPUT_BASE = resolve(
-  join(process.env.HOME || "/Users/eric", "Downloads", "aplus-builder"),
-);
+import { userBase } from "@/lib/config";
 
 export async function GET(req: NextRequest) {
   const dirName = req.nextUrl.searchParams.get("dir");
   if (!dirName)
     return NextResponse.json({ error: "dir required" }, { status: 400 });
+
+  const base = userBase(req.headers.get("x-user-id") || "admin");
 
   // 防目录遍历：dirName 允许含 "/"（客户/产品两级目录），但拒绝空段、"."、".." 和隐藏目录
   const parts = dirName.split("/");
@@ -21,10 +20,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "非法目录名" }, { status: 400 });
   }
 
-  const dirPath = resolve(join(OUTPUT_BASE, dirName));
+  const dirPath = resolve(join(base, dirName));
 
-  // 双保险：解析后的路径必须仍在 OUTPUT_BASE 之内
-  if (!dirPath.startsWith(OUTPUT_BASE + sep)) {
+  // 双保险：解析后的路径必须仍在 base 之内
+  if (!dirPath.startsWith(base + sep)) {
     return NextResponse.json({ error: "非法目录名" }, { status: 400 });
   }
 

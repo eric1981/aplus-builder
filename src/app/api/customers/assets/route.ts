@@ -10,6 +10,7 @@ import { extname } from "path";
 export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id");
   const type = request.nextUrl.searchParams.get("type");
+  const userId = request.headers.get("x-user-id") || "admin";
 
   if (!id || !type) {
     return NextResponse.json({ error: "Missing id or type" }, { status: 400 });
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
 
   let profile: ReturnType<typeof getCustomer>;
   try {
-    profile = getCustomer(id);
+    profile = getCustomer(id, userId);
   } catch {
     return NextResponse.json({ error: "非法客户 ID" }, { status: 400 });
   }
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ dataUrl: null });
   }
 
-  const fp = getCustomerFilePath(id, filename);
+  const fp = getCustomerFilePath(id, filename, userId);
   if (!fp) {
     return NextResponse.json({ dataUrl: null });
   }

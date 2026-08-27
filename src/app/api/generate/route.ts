@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn, spawnSync, type ChildProcess } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync, renameSync } from "fs";
 import { join, extname, dirname } from "path";
 import { randomUUID } from "crypto";
 import { taskStore, type PersistedTask } from "./task-store";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
-
-const OUTPUT_BASE = join("/Users", "eric", "Downloads", "aplus-builder");
+import { AGENT_HOME, AGENT_TIMEOUT_MS, userBase } from "@/lib/config";
+import { logAudit } from "@/lib/audit";
+import { screenshotPage } from "@/lib/screenshot";
 
 function sanitizeProductName(description: string, taskId: string): string {
   const tid = taskId.slice(0, 8);
@@ -34,7 +35,6 @@ type Task = {
 };
 
 const tasks = new Map<string, Task>();
-const AGENT_TIMEOUT = 20 * 60 * 1000;
 const MAX_CONCURRENT = 2;
 /** 排队上限（成本保护）：超过即 429 */
 const MAX_QUEUE = parseInt(process.env.MAX_QUEUE || "20", 10) || 20;
@@ -77,7 +77,7 @@ const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/j
 
 // ===== Agent 启动（被 POST 和 recovery 共用）=====
 
-function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) {
+function spawnAgent(taskId: string, workDir: string, customTemplateId: string | undefined, userId: string) {
   let outputDir = join(workDir, "output");       // 客户交付物放 output/ 子目录
   let indexHtml = join(outputDir, "index.html");
   const manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录
@@ -95,8 +95,8 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
 
   const child = spawn("/bin/bash", [scriptPath], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, HOME: "/Users/eric" },
-    cwd: "/Users/eric",
+    env: { ...process.env, HOME: AGENT_HOME },
+    cwd: AGENT_HOME,
   });
   children.set(taskId, child);
 
@@ -205,8 +205,10 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
 
       finalize("done", protectedHtml, undefined, images, signal, variants.length > 0 ? variants : undefined, finalProductName || undefined);
       console.log(`[hermes-cli] ✅ HTML ${protectedHtml.length} chars, ${images.length} images, ${variants.length} variants`);
+      logAudit(userId, "task.done", { taskId, product: finalProductName || undefined, images: images.length });
 
-      captureGalleryScreenshots(outputDir);
+      // 异步生成画廊截图（不再同步阻塞事件循环）
+      captureGalleryScreenshotsAsync(outputDir);
       return true;
     } catch (e: any) {
       finalize("error", undefined, e.message);
@@ -217,7 +219,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
   const timer = setTimeout(() => {
     child.kill("SIGTERM");
     if (!collectAndFinish()) finalize("error", undefined, "Agent 超时");
-  }, AGENT_TIMEOUT);
+  }, AGENT_TIMEOUT_MS);
 
   child.stdout.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
   child.stderr.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
@@ -247,7 +249,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId?: string) 
       console.log(`[hermes-cli] Task ${taskId} 失败（exit=${code}），自动重试 ${attempts}/${MAX_AGENT_ATTEMPTS}`);
       taskStore.bumpAttempts(taskId);
       tasks.set(taskId, { status: "queued", log: logBuffer.slice(-2000) });
-      queue.unshift({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId) }); // 重试优先
+      queue.unshift({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) }); // 重试优先
       releaseSlot(); // 释放槽位 → tryProcessQueue 立即拉起重试
       return;
     }
@@ -280,6 +282,10 @@ export async function POST(request: NextRequest) {
     let modelRefPath = "";
     let logoPath = "";
 
+    // 多用户隔离：x-user-id 由 proxy 注入；无则视为 admin（本地默认布局）
+    const userId = request.headers.get("x-user-id") || "admin";
+    const base = userBase(userId);
+
     // 先取 description 和 product_name 用于目录命名
     const description = (formData.get("description") as string) || "";
     const productNameInput = (formData.get("product_name") as string) || "";
@@ -296,8 +302,8 @@ export async function POST(request: NextRequest) {
       : "";
 
     const workDir = customerDir
-      ? join(OUTPUT_BASE, customerDir, productDir)
-      : join(OUTPUT_BASE, productDir);
+      ? join(base, customerDir, productDir)
+      : join(base, productDir);
     const inputDir = join(workDir, "input");
     const outputDir = workDir;
     const promptFile = join(workDir, "prompt.txt");
@@ -502,7 +508,7 @@ export async function POST(request: NextRequest) {
     // 持久化任务元数据
     taskStore.add({
       taskId,
-      userId: "anonymous",
+      userId,
       status: activeCount >= MAX_CONCURRENT ? "queued" : "running",
       workDir,
       mode,
@@ -511,16 +517,19 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
     });
 
+    // 审计：任务创建
+    logAudit(userId, "task.create", { taskId, mode, workDir });
+
     // 检查并发
     if (activeCount >= MAX_CONCURRENT) {
       tasks.set(taskId, { status: "queued", queuePosition: 1, log: "" });
-      queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId) });
+      queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) });
       updateQueuePositions();
       return NextResponse.json({ taskId, queued: true, queuePosition: 1 });
     }
 
     activeCount++;
-    spawnAgent(taskId, workDir, customTemplateId);
+    spawnAgent(taskId, workDir, customTemplateId, userId);
     return NextResponse.json({ taskId });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "启动失败" }, { status: 500 });
@@ -548,6 +557,9 @@ export async function DELETE(request: NextRequest) {
   if (!taskId) return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
   const task = tasks.get(taskId);
   if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+
+  const userId = request.headers.get("x-user-id") || "admin";
+  logAudit(userId, "task.cancel", { taskId, status: task.status });
 
   if (task.status === "queued") {
     // 从排队队列移除
@@ -592,16 +604,16 @@ export async function DELETE(request: NextRequest) {
     tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", log: "" });
 
     if (t.status === "queued") {
-      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId) });
+      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId) });
       continue;
     }
 
     if (activeCount < MAX_CONCURRENT) {
       activeCount++;
-      spawnAgent(t.taskId, t.workDir, t.customTemplateId);
+      spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId);
     } else {
       tasks.set(t.taskId, { status: "queued", queuePosition: 1, log: "" });
-      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId) });
+      queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId) });
     }
   }
   updateQueuePositions();
@@ -720,12 +732,11 @@ function embedImages(html: string, baseDir: string, fallbackDir?: string): strin
   return result;
 }
 
-// ===== 画廊截图 =====
+// ===== 画廊截图（异步，不阻塞事件循环）=====
 
 const GALLERY_DIR = join(process.cwd(), "public", "gallery");
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
-function captureGalleryScreenshots(outputDir: string) {
+function captureGalleryScreenshotsAsync(outputDir: string) {
   try {
     mkdirSync(GALLERY_DIR, { recursive: true });
     const htmlFiles = [
@@ -737,13 +748,8 @@ function captureGalleryScreenshots(outputDir: string) {
       const htmlPath = join(outputDir, src);
       if (!existsSync(htmlPath)) continue;
       const destPath = join(GALLERY_DIR, dest);
-      try {
-        spawnSync(CHROME, [
-          "--headless=new", "--disable-gpu", "--no-sandbox",
-          `--screenshot=${destPath}`, "--window-size=450,800",
-          `file://${htmlPath}`,
-        ], { timeout: 15000 });
-      } catch {}
+      // fire-and-forget：并发由 screenshot.ts 内部限制
+      screenshotPage({ htmlPath, destPath }).catch(() => {});
     }
   } catch {}
 }
