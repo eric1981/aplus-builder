@@ -1,16 +1,16 @@
 /**
- * customer-store.ts — 客户档案抽象层
+ * customer-store.ts — 客户档案抽象层（数据库驱动）
  *
- * 当前实现：JSON 文件系统（<customersRoot>/<id>/profile.json）
- * 以后换 SQLite：只改这个文件的内部实现，接口保持不变。
+ * 元数据存 SQLite customers 表；媒体文件（Logo、模特图）仍在磁盘
+ * （<customersRoot>/<id>/ 目录），库里只存文件名。
  *
- * 多用户（稳定性 P1）：
- * - 所有公开函数可传 userId（默认 "admin"）
- * - admin 沿用旧布局 <项目>/customers/；其他用户隔离到 <OUTPUT_BASE>/<userId>/customers/
+ * 多用户：所有公开函数可传 userId（默认 "admin"）；
+ * admin 沿用旧磁盘布局，其他用户隔离到 <OUTPUT_BASE>/<userId>/customers/。
  */
 
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync } from "fs";
+import { existsSync, rmSync, mkdirSync, readFileSync } from "fs";
 import { join, extname, resolve, sep } from "path";
+import { db, ensureMigrated } from "@/lib/db";
 import { userBase } from "@/lib/config";
 
 export interface CustomerProfile {
@@ -36,25 +36,15 @@ export interface CustomerProfile {
   updatedAt: string;
 }
 
-/** 用户客户的根目录：admin 沿用旧布局，其余用户隔离到各自产出目录下 */
+/** 用户客户的磁盘根目录：admin 沿用旧布局，其余用户隔离到各自产出目录下 */
 function customersRoot(userId: string): string {
   return userId && userId !== "admin"
     ? join(userBase(userId), "customers")
     : join(process.cwd(), "customers");
 }
 
-function ensureDir(userId: string) {
-  const dir = customersRoot(userId);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
-
 // ===== 安全校验 =====
 
-/**
- * 拒绝可用于路径穿越的客户 ID。
- * 宽松策略：只拦截会造成目录逃逸的输入（分隔符、相对路径、隐藏目录），
- * 不强制字符集，避免破坏磁盘上已有的合法目录名。
- */
 function assertSafeId(id: string): void {
   if (
     !id ||
@@ -69,7 +59,6 @@ function assertSafeId(id: string): void {
   }
 }
 
-/** 断言 target 解析后仍位于 base 之内（防路径越界） */
 function assertInside(base: string, target: string): void {
   if (!resolve(target).startsWith(resolve(base) + sep)) {
     throw new Error("路径越界");
@@ -80,42 +69,63 @@ function customerDir(userId: string, id: string) {
   assertSafeId(id);
   return join(customersRoot(userId), id);
 }
-function profilePath(userId: string, id: string) {
-  assertSafeId(id);
-  return join(customerDir(userId, id), "profile.json");
+
+// ===== 行 ↔ 对象映射 =====
+
+function rowToProfile(row: Record<string, unknown>): CustomerProfile {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    logo: row.logo ? String(row.logo) : undefined,
+    modelRef: row.model_ref ? String(row.model_ref) : undefined,
+    template: row.template ? String(row.template) : undefined,
+    sizeChartCsv: row.size_chart_csv ? String(row.size_chart_csv) : undefined,
+    requirements: row.requirements ? String(row.requirements) : undefined,
+    defaultStyle: row.default_style ? String(row.default_style) : undefined,
+    defaultModel: row.default_model ? String(row.default_model) : undefined,
+    notes: row.notes ? String(row.notes) : undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function toUndef(v: unknown): string | undefined {
+  return v === null || v === undefined ? undefined : String(v);
 }
 
 // ===== 公开 API =====
 
 /** 列出某用户的所有客户 */
 export function listCustomers(userId: string = "admin"): CustomerProfile[] {
-  ensureDir(userId);
-  const root = customersRoot(userId);
-  const ids = readdirSync(root, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-    .map((d) => d.name);
-  return ids.map((id) => getCustomer(id, userId)).filter(Boolean) as CustomerProfile[];
+  ensureMigrated(); // 首次查询时执行旧数据迁移
+  const rows = db
+    .prepare(`SELECT * FROM customers WHERE user_id = ? ORDER BY created_at ASC`)
+    .all(userId) as Record<string, unknown>[];
+  return rows.map(rowToProfile);
 }
 
 /** 获取单个客户 */
 export function getCustomer(id: string, userId: string = "admin"): CustomerProfile | null {
-  const p = profilePath(userId, id);
-  if (!existsSync(p)) return null;
-  return JSON.parse(readFileSync(p, "utf-8"));
+  ensureMigrated();
+  const row = db
+    .prepare(`SELECT * FROM customers WHERE user_id = ? AND id = ?`)
+    .get(userId, id) as Record<string, unknown> | undefined;
+  return row ? rowToProfile(row) : null;
 }
 
-/** 创建客户（目录 + profile.json） */
+/** 创建客户（DB 记录 + 磁盘目录） */
 export function createCustomer(name: string, userId: string = "admin"): CustomerProfile {
-  ensureDir(userId);
   const id = sanitizeId(name);
-  const dir = customerDir(userId, id);
-  if (existsSync(dir)) throw new Error(`客户 "${id}" 已存在`);
+  if (getCustomer(id, userId)) throw new Error(`客户 "${id}" 已存在`);
 
+  const dir = customerDir(userId, id);
   mkdirSync(dir, { recursive: true });
+
   const now = new Date().toISOString();
-  const profile: CustomerProfile = { id, name, createdAt: now, updatedAt: now };
-  writeFileSync(profilePath(userId, id), JSON.stringify(profile, null, 2), "utf-8");
-  return profile;
+  db.prepare(
+    `INSERT INTO customers (user_id, id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+  ).run(userId, id, name, now, now);
+  return { id, name, createdAt: now, updatedAt: now };
 }
 
 /** 更新客户信息 */
@@ -127,15 +137,37 @@ export function updateCustomer(
   const current = getCustomer(id, userId);
   if (!current) throw new Error(`客户 "${id}" 不存在`);
   const merged = { ...current, ...updates, id: current.id, updatedAt: new Date().toISOString() };
-  writeFileSync(profilePath(userId, id), JSON.stringify(merged, null, 2), "utf-8");
+
+  db.prepare(
+    `UPDATE customers SET
+       name = ?, logo = ?, model_ref = ?, template = ?, size_chart_csv = ?,
+       requirements = ?, default_style = ?, default_model = ?, custom_template_id = ?,
+       notes = ?, updated_at = ?
+     WHERE user_id = ? AND id = ?`,
+  ).run(
+    merged.name,
+    toUndef(merged.logo) ?? null,
+    toUndef(merged.modelRef) ?? null,
+    toUndef(merged.template) ?? null,
+    toUndef(merged.sizeChartCsv) ?? null,
+    toUndef(merged.requirements) ?? null,
+    toUndef(merged.defaultStyle) ?? null,
+    toUndef(merged.defaultModel) ?? null,
+    toUndef((merged as { customTemplateId?: string }).customTemplateId) ?? null,
+    toUndef(merged.notes) ?? null,
+    merged.updatedAt,
+    userId,
+    id,
+  );
   return merged;
 }
 
-/** 删除客户及其全部数据 */
+/** 删除客户：DB 记录 + 磁盘目录（含媒体文件） */
 export function deleteCustomer(id: string, userId: string = "admin"): void {
   const dir = resolve(customerDir(userId, id));
-  assertInside(customersRoot(userId), dir); // 双保险：即便 ID 校验被绕过也不允许删到根目录之外
+  assertInside(customersRoot(userId), dir);
   if (existsSync(dir)) rmSync(dir, { recursive: true });
+  db.prepare(`DELETE FROM customers WHERE user_id = ? AND id = ?`).run(userId, id);
 }
 
 /** 获取客户目录的绝对路径（供上传等写入场景使用） */
@@ -154,7 +186,7 @@ export function getCustomerFilePath(
   if (!filename || filename === "." || filename === "..") return null;
   if (filename.includes("/") || filename.includes("\\") || filename.includes("\0")) return null;
   const p = resolve(customerDir(userId, id), filename);
-  assertInside(customersRoot(userId), p); // 防 logo/modelRef 等字段被注入 "../" 后越界读取
+  assertInside(customersRoot(userId), p);
   return existsSync(p) ? p : null;
 }
 

@@ -1,16 +1,9 @@
 /**
- * 任务持久化（稳定性 P0）：
- * - 存储位置从 /tmp（重启即丢）迁移到 <项目>/data/tasks.json（稳定、可备份）
- * - 原子写入（先写临时文件再 rename），避免进程崩溃时损坏 JSON
- * - 记录 attempts（自动重试次数），恢复时不会无限重跑
- *
- * 后续若要换 SQLite/Postgres，只改本文件内部实现，接口保持不变。
+ * 任务存储（数据库驱动）：运行时队列与历史记录共用 tasks 表。
+ * - 任务创建时 INSERT（status=queued/running），完成/失败时 UPDATE 状态并保留记录
+ * - 历史列表直接查库，不再递归扫描产出目录
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "fs";
-import { join } from "path";
-
-const DATA_DIR = join(process.cwd(), "data");
-const STORE_PATH = join(DATA_DIR, "tasks.json");
+import { db, ensureMigrated } from "@/lib/db";
 
 export interface PersistedTask {
   taskId: string;
@@ -19,83 +12,171 @@ export interface PersistedTask {
   workDir: string;
   mode: string;
   customTemplateId?: string;
-  /** 已启动 Agent 的次数（用于自动重试上限） */
   attempts: number;
   createdAt: number;
 }
 
-function ensureDir() {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+export interface HistoryTask {
+  taskId: string;
+  dirName: string | null;
+  productName: string | null;
+  imageCount: number;
+  firstImage: string | null;
+  variantNames: string[];
+  createdAt: number;
+  error: string | null;
 }
 
-function writeAtomic(data: PersistedTask[]) {
-  ensureDir();
-  const tmp = STORE_PATH + ".tmp";
-  writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  renameSync(tmp, STORE_PATH);
+function toHistory(row: Record<string, unknown>): HistoryTask {
+  let variantNames: string[] = [];
+  try {
+    variantNames = JSON.parse(String(row.variant_names || "[]"));
+  } catch {}
+  return {
+    taskId: String(row.task_id),
+    dirName: row.dir_name ? String(row.dir_name) : null,
+    productName: row.product_name ? String(row.product_name) : null,
+    imageCount: Number(row.image_count || 0),
+    firstImage: row.first_image ? String(row.first_image) : null,
+    variantNames,
+    createdAt: Number(row.created_at || 0),
+    error: row.error ? String(row.error) : null,
+  };
 }
 
 class TaskStore {
-  private data: PersistedTask[] = [];
-
-  constructor() {
-    this.load();
-  }
-
-  private load() {
-    try {
-      if (existsSync(STORE_PATH)) {
-        this.data = JSON.parse(readFileSync(STORE_PATH, "utf-8"));
-      }
-    } catch {
-      // 文件损坏时重置，避免服务起不来
-      this.data = [];
-      try { writeAtomic(this.data); } catch {}
-    }
-  }
-
-  private save() {
-    try {
-      writeAtomic(this.data);
-    } catch {}
-  }
-
   add(task: PersistedTask) {
-    this.data = this.data.filter((t) => t.taskId !== task.taskId);
-    this.data.push(task);
-    // 只保留最近 100 条
-    if (this.data.length > 100) {
-      this.data = this.data.slice(-100);
-    }
-    this.save();
+    db.prepare(
+      `INSERT INTO tasks
+        (task_id, user_id, status, mode, work_dir, custom_template_id, attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(task_id) DO UPDATE SET
+         status = excluded.status,
+         updated_at = excluded.updated_at`,
+    ).run(
+      task.taskId,
+      task.userId,
+      task.status,
+      task.mode,
+      task.workDir,
+      task.customTemplateId || null,
+      task.attempts,
+      task.createdAt,
+      Date.now(),
+    );
   }
 
   remove(taskId: string) {
-    this.data = this.data.filter((t) => t.taskId !== taskId);
-    this.save();
+    db.prepare(`DELETE FROM tasks WHERE task_id = ?`).run(taskId);
   }
 
   get(taskId: string): PersistedTask | undefined {
-    return this.data.find((t) => t.taskId === taskId);
+    const row = db
+      .prepare(`SELECT * FROM tasks WHERE task_id = ?`)
+      .get(taskId) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return {
+      taskId: String(row.task_id),
+      userId: String(row.user_id || "admin"),
+      status: row.status === "queued" ? "queued" : "running",
+      workDir: String(row.work_dir || ""),
+      mode: String(row.mode || "detail"),
+      customTemplateId: row.custom_template_id ? String(row.custom_template_id) : undefined,
+      attempts: Number(row.attempts || 1),
+      createdAt: Number(row.created_at || 0),
+    };
   }
 
-  /** 自动重试计数 +1（不改变 status） */
+  /** 自动重试计数 +1 */
   bumpAttempts(taskId: string) {
-    const t = this.get(taskId);
-    if (!t) return;
-    t.attempts = (t.attempts || 0) + 1;
-    this.save();
-  }
-
-  getAll(): PersistedTask[] {
-    return [...this.data];
-  }
-
-  /** 恢复时需要重启的任务 */
-  getRecoverable(): PersistedTask[] {
-    return this.data.filter(
-      (t) => t.status === "running" || t.status === "queued"
+    db.prepare(`UPDATE tasks SET attempts = attempts + 1, updated_at = ? WHERE task_id = ?`).run(
+      Date.now(),
+      taskId,
     );
+  }
+
+  /** 恢复时需要重启的任务（运行中/排队中） */
+  getRecoverable(): PersistedTask[] {
+    const rows = db
+      .prepare(`SELECT * FROM tasks WHERE status IN ('running','queued') ORDER BY created_at`)
+      .all() as Record<string, unknown>[];
+    return rows
+      .filter((r) => r.work_dir)
+      .map((r) => ({
+        taskId: String(r.task_id),
+        userId: String(r.user_id || "admin"),
+        status: r.status === "queued" ? ("queued" as const) : ("running" as const),
+        workDir: String(r.work_dir),
+        mode: String(r.mode || "detail"),
+        customTemplateId: r.custom_template_id ? String(r.custom_template_id) : undefined,
+        attempts: Number(r.attempts || 1),
+        createdAt: Number(r.created_at || 0),
+      }));
+  }
+
+  /** 任务完成：更新状态与产出元数据（历史记录来源） */
+  markDone(
+    taskId: string,
+    meta: {
+      productName?: string;
+      dirName?: string;
+      imageCount: number;
+      firstImage?: string | null;
+      variantNames?: string[];
+    },
+  ) {
+    db.prepare(
+      `UPDATE tasks SET
+         status = 'done',
+         product_name = COALESCE(?, product_name),
+         dir_name = COALESCE(?, dir_name),
+         image_count = ?,
+         first_image = COALESCE(?, first_image),
+         variant_names = ?,
+         error = NULL,
+         updated_at = ?
+       WHERE task_id = ?`,
+    ).run(
+      meta.productName || null,
+      meta.dirName || null,
+      meta.imageCount,
+      meta.firstImage || null,
+      JSON.stringify(meta.variantNames || []),
+      Date.now(),
+      taskId,
+    );
+  }
+
+  /** 任务失败/取消：更新状态与错误信息（保留记录供审计/历史） */
+  markError(taskId: string, error: string) {
+    db.prepare(`UPDATE tasks SET status = 'error', error = ?, updated_at = ? WHERE task_id = ?`).run(
+      error,
+      Date.now(),
+      taskId,
+    );
+  }
+
+  /** 某用户的历史（已完成且有产出的任务） */
+  listHistory(userId: string): HistoryTask[] {
+    ensureMigrated(); // 首次查询时执行旧数据迁移
+    const rows = db
+      .prepare(
+        `SELECT task_id, dir_name, product_name, image_count, first_image, variant_names, created_at, error
+         FROM tasks
+         WHERE user_id = ? AND status = 'done' AND image_count > 0
+         ORDER BY created_at DESC
+         LIMIT 500`,
+      )
+      .all(userId) as Record<string, unknown>[];
+    return rows.map(toHistory);
+  }
+
+  /** 用户最近的任务总数（后台用） */
+  countByUser(userId: string): number {
+    const row = db
+      .prepare(`SELECT COUNT(*) AS c FROM tasks WHERE user_id = ?`)
+      .get(userId) as { c: number } | undefined;
+    return Number(row?.c || 0);
   }
 }
 

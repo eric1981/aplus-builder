@@ -56,7 +56,20 @@ npx next start -p 3000 # 启动（production 模式，ngrok 不支持 WS 所以�
 
 ## 稳定性保护（对外开放 P0+P1）
 
-对外公开前必须启用的成本/稳定性护栏（环境变量，默认值已兼容本地单用户）：
+### 数据存储（SQLite）
+
+- 元数据全部入库 `data/app.db`（Node 24 内置 `node:sqlite`，零依赖，WAL 模式）：
+  - `tasks`：生成任务（运行时队列 + 历史记录一体），历史列表直接查库，不再递归扫描磁盘
+  - `customers`：客户档案（媒体文件仍在磁盘 `customers/<id>/`，库里存文件名）
+  - `users`：用户注册表（`AUTH_USERS` 种子）
+  - `audit_log`：审计日志（替代 JSONL 文件）
+  - `quota`：日/月配额计数（替代 quota.json）
+- **首次启动自动迁移**：从旧存储（`data/users.json`、`data/tasks.json`、`data/quota.json`、`data/audit.log`、`customers/` 磁盘、产出目录扫描）一次性导入，幂等
+- 媒体文件（图片、HTML 交付物）仍存磁盘
+
+### 成本/稳定性护栏（环境变量）
+
+对外公开前必须启用的护栏（默认值已兼容本地单用户）：
 
 | 环境变量 | 默认 | 作用 |
 |---|---|---|

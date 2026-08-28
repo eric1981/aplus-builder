@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync, renameSync } from "fs";
-import { join, extname, dirname } from "path";
+import { join, extname, dirname, relative } from "path";
 import { randomUUID } from "crypto";
 import { taskStore, type PersistedTask } from "./task-store";
 import { validateImageBlob } from "@/lib/upload-validate";
@@ -83,10 +83,12 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
   const manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录
   const logFile = join(workDir, "agent.log");
   const scriptPath = join(workDir, "run.sh");
+  // 任务产出目录（collectAndFinish 内更新），用于计算历史记录的首图相对路径
+  let actualOutputDir = outputDir;
 
   if (!existsSync(scriptPath)) {
     tasks.set(taskId, { status: "error", error: "恢复失败：缺少 run.sh", log: "" });
-    taskStore.remove(taskId);
+    taskStore.markError(taskId, "恢复失败：缺少 run.sh");
     releaseSlot();
     return;
   }
@@ -108,7 +110,22 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     settled = true;
     children.delete(taskId);
     tasks.set(taskId, { status, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
-    taskStore.remove(taskId);
+    // 数据库持久化：完成/失败都保留记录（历史 + 审计）
+    if (status === "done") {
+      const base = userBase(userId);
+      taskStore.markDone(taskId, {
+        productName,
+        dirName: relative(base, workDir),
+        imageCount: images?.length || 0,
+        firstImage:
+          images && images.length > 0
+            ? relative(base, join(actualOutputDir, images[0].name))
+            : null,
+        variantNames: variants?.map((v) => v.name),
+      });
+    } else {
+      taskStore.markError(taskId, errMsg || "任务失败");
+    }
     releaseSlot();
   };
 
@@ -131,7 +148,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
       : existsSync(join(workDir, "index.html")) ? join(workDir, "index.html")
       : null;
     if (!actualIndex) return false;
-    const actualOutputDir = dirname(actualIndex);
+    actualOutputDir = dirname(actualIndex);
     try {
       const images = collectImages(actualOutputDir);
       const signal = extractPreferenceSignal(manifestPath);
@@ -566,7 +583,7 @@ export async function DELETE(request: NextRequest) {
     const idx = queue.findIndex((q) => q.taskId === taskId);
     if (idx !== -1) queue.splice(idx, 1);
     tasks.set(taskId, { status: "error", error: "任务已取消", log: task.log });
-    taskStore.remove(taskId);
+    taskStore.markError(taskId, "任务已取消");
     return NextResponse.json({ ok: true, canceled: true });
   }
 
@@ -593,10 +610,27 @@ export async function DELETE(request: NextRequest) {
       continue;
     }
 
-    // 如果 output/index.html 或 index.html 已存在，说明 Agent 已完成
+    // 如果 output/index.html 或 index.html 已存在，说明 Agent 已完成 → 标记完成并入历史
     if (existsSync(join(t.workDir, "output", "index.html"))
         || existsSync(join(t.workDir, "index.html"))) {
-      taskStore.remove(t.taskId);
+      const scanPath = existsSync(join(t.workDir, "output"))
+        ? join(t.workDir, "output")
+        : t.workDir;
+      let imageCount = 0;
+      let firstImage: string | null = null;
+      try {
+        const files = readdirSync(scanPath).filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f)).sort();
+        imageCount = files.length;
+        if (files.length > 0) {
+          firstImage = relative(userBase(t.userId), join(scanPath, files[0]));
+        }
+      } catch {}
+      taskStore.markDone(t.taskId, {
+        dirName: relative(userBase(t.userId), t.workDir),
+        imageCount,
+        firstImage,
+        variantNames: [],
+      });
       console.log(`[hermes-cli] ✅ 恢复时发现已完成：${t.workDir}`);
       continue;
     }
