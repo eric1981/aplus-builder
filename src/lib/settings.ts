@@ -13,7 +13,7 @@ import { registerSettingsGetter } from "@/lib/config";
 export interface SettingDef {
   key: string;
   label: string;
-  group: "quota" | "concurrency" | "agent" | "upload" | "system";
+  group: "quota" | "concurrency" | "agent" | "upload" | "system" | "auth";
   type: "number" | "boolean" | "select";
   options?: string[];
   env?: string;
@@ -41,6 +41,8 @@ export const SETTING_DEFS: SettingDef[] = [
   { key: "styleTimeoutMinutes", label: "风格复刻超时", group: "agent", type: "number", env: "STYLE_TIMEOUT_MINUTES", default: 10, unit: "分钟" },
   // 上传
   { key: "maxUploadMb", label: "单文件上传上限", group: "upload", type: "number", env: "MAX_UPLOAD_MB", default: 15, unit: "MB" },
+  // 登录与安全
+  { key: "trustLocalhost", label: "本机免登录（localhost = admin）", group: "auth", type: "boolean", env: "TRUST_LOCALHOST", default: false, description: "默认关闭：本机也要求登录，可完整测试登录系统；开启后本机免登录" },
   // 系统（部署级，仅环境变量生效，后台只读展示）
   { key: "outputBase", label: "产出根目录 OUTPUT_BASE", group: "system", type: "select", options: [], env: "OUTPUT_BASE", default: "", restartRequired: true, description: "部署级路径，仅环境变量生效" },
   { key: "agentHome", label: "Agent 工作目录 AGENT_HOME", group: "system", type: "select", options: [], env: "AGENT_HOME", default: "", restartRequired: true, description: "部署级路径，仅环境变量生效" },

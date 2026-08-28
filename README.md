@@ -67,6 +67,7 @@ npx next start -p 3000 # 启动（production 模式，ngrok 不支持 WS 所以�
 - **每用户配额**：`/admin` 用户列表可设每个用户的日/月任务上限（空 = 不限，跟随全局）；全局配额在「系统设置」调整
 - **配置中心**：所有运行参数（全局配额、并发数、队列上限、重试次数、截图并发、限流、Agent 联网/超时、上传上限）存 `settings` 表，管理后台「系统设置」可改且**即时生效**，环境变量兜底
 - **身份链路**：会话 Cookie（或 Bearer token / localhost）→ proxy 注入 `x-user-id` → 下游数据按用户隔离
+- **登录模式（默认严格）**：所有页面（含本机 localhost）都要求登录，未登录访问自动跳转 `/login`。如需本机免登录开发便利，可在 `/admin`「系统设置」开启 `本机免登录（localhost = admin）`（`TRUST_LOCALHOST=1`）
 - **`/api/output` 图片隔离**：会话 Cookie 随 iframe `<img>` 请求自动携带，多用户预览图互不可见（此前 Bearer token 无法实现的限制已解决）
 - **兼容**：原有 `AUTH_USERS` API token 认证保留，脚本调用不受影响
 

@@ -217,6 +217,7 @@ export default function AdminPage() {
     concurrency: "并发与队列",
     agent: "Agent",
     upload: "上传",
+    auth: "登录与安全",
     system: "系统（部署级，仅环境变量生效）",
   };
 
@@ -280,7 +281,7 @@ export default function AdminPage() {
 
         {tab === "settings" && (
           <div className="space-y-6">
-            {(["quota", "concurrency", "agent", "upload", "system"] as const).map((group) => {
+            {(["quota", "concurrency", "agent", "upload", "auth", "system"] as const).map((group) => {
               const items = settings.filter((s) => s.group === group);
               if (items.length === 0) return null;
               return (

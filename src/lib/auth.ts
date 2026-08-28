@@ -135,7 +135,25 @@ export function authenticateUser(email: string, password: string): AuthUser | nu
 /** 首启创建管理员：ADMIN_EMAIL/ADMIN_PASSWORD 环境变量，未配置则随机生成并打印 */
 export function seedAdmin() {
   try {
-    // 存在"有密码的管理员"则跳过；admin 行存在但无密码（如数据清理后）会重新播种
+    const email = (process.env.ADMIN_EMAIL || "admin@local").toLowerCase().trim();
+    const password = process.env.ADMIN_PASSWORD;
+
+    if (password) {
+      // 显式配置了 ADMIN_PASSWORD：每次启动强制执行（同时可作为密码恢复手段）
+      db.prepare(
+        `INSERT INTO users (id, name, email, token, password_hash, role, disabled, created_at)
+         VALUES ('admin', '管理员', ?, ?, ?, 'admin', 0, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           email = excluded.email,
+           password_hash = excluded.password_hash,
+           role = 'admin',
+           disabled = 0`,
+      ).run(email, randomBytes(16).toString("hex"), hashPassword(password), new Date().toISOString());
+      console.log(`[auth] 管理员就绪：${email}（密码来自 ADMIN_PASSWORD）`);
+      return;
+    }
+
+    // 未配置 ADMIN_PASSWORD：仅在无管理员时创建随机密码并打印一次
     const row = db
       .prepare(
         `SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND password_hash IS NOT NULL`,
@@ -143,23 +161,12 @@ export function seedAdmin() {
       .get() as { c: number } | undefined;
     if (Number(row?.c || 0) > 0) return;
 
-    const email = (process.env.ADMIN_EMAIL || "admin@local").toLowerCase().trim();
-    const password = process.env.ADMIN_PASSWORD || randomBytes(9).toString("base64url");
+    const generated = randomBytes(9).toString("base64url");
     db.prepare(
       `INSERT INTO users (id, name, email, token, password_hash, role, disabled, created_at)
-       VALUES ('admin', '管理员', ?, ?, ?, 'admin', 0, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         email = excluded.email,
-         password_hash = excluded.password_hash,
-         role = 'admin',
-         disabled = 0`,
-    ).run(email, randomBytes(16).toString("hex"), hashPassword(password), new Date().toISOString());
-
-    if (!process.env.ADMIN_PASSWORD) {
-      console.log(`\n[auth] 已创建初始管理员：${email} / ${password}`);
-      console.log(`[auth] 请尽快登录修改密码（或设置 ADMIN_PASSWORD 环境变量后重建）。\n`);
-    } else {
-      console.log(`[auth] 初始管理员已创建：${email}（密码来自 ADMIN_PASSWORD）`);
-    }
+       VALUES ('admin', '管理员', ?, ?, ?, 'admin', 0, ?)`,
+    ).run(email, randomBytes(16).toString("hex"), hashPassword(generated), new Date().toISOString());
+    console.log(`\n[auth] 已创建初始管理员：${email} / ${generated}`);
+    console.log(`[auth] 请尽快登录修改密码（或设置 ADMIN_PASSWORD 环境变量后重建）。\n`);
   } catch {}
 }
