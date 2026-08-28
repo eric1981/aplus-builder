@@ -19,6 +19,9 @@ export interface User {
   token: string;
   role: "admin" | "user";
   disabled: boolean;
+  /** 每用户配额（null = 不限，跟随全局） */
+  dailyLimit?: number | null;
+  monthlyLimit?: number | null;
   createdAt: string;
 }
 
@@ -30,6 +33,8 @@ function rowToUser(row: Record<string, unknown>): User {
     token: row.token ? String(row.token) : "",
     role: (row.role as User["role"]) || "user",
     disabled: Boolean(Number(row.disabled || 0)),
+    dailyLimit: row.daily_limit == null ? null : Number(row.daily_limit),
+    monthlyLimit: row.monthly_limit == null ? null : Number(row.monthly_limit),
     createdAt: String(row.created_at || ""),
   };
 }
@@ -129,6 +134,17 @@ export function setUserRole(id: string, role: "admin" | "user"): void {
   const u = getUserById(id);
   if (!u) throw new Error("用户不存在");
   db.prepare(`UPDATE users SET role = ? WHERE id = ?`).run(role, id);
+}
+
+/** 设置每用户配额（null = 不限，跟随全局） */
+export function setUserQuota(id: string, dailyLimit: number | null, monthlyLimit: number | null): void {
+  const u = getUserById(id);
+  if (!u) throw new Error("用户不存在");
+  db.prepare(`UPDATE users SET daily_limit = ?, monthly_limit = ? WHERE id = ?`).run(
+    dailyLimit == null ? null : Math.max(0, Math.floor(dailyLimit)),
+    monthlyLimit == null ? null : Math.max(0, Math.floor(monthlyLimit)),
+    id,
+  );
 }
 
 /** 删除用户（连带会话；任务与客户数据保留在库中可按 user_id 追溯） */

@@ -67,6 +67,8 @@ export function initSchema() {
       password_hash TEXT,
       role          TEXT NOT NULL DEFAULT 'user',
       disabled      INTEGER NOT NULL DEFAULT 0,
+      daily_limit   INTEGER,
+      monthly_limit INTEGER,
       created_at    TEXT NOT NULL
     );
 
@@ -146,6 +148,8 @@ function ensureUserColumns() {
       { col: "token", ddl: `ALTER TABLE users ADD COLUMN token TEXT` },
       { col: "password_hash", ddl: `ALTER TABLE users ADD COLUMN password_hash TEXT` },
       { col: "disabled", ddl: `ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0` },
+      { col: "daily_limit", ddl: `ALTER TABLE users ADD COLUMN daily_limit INTEGER` },
+      { col: "monthly_limit", ddl: `ALTER TABLE users ADD COLUMN monthly_limit INTEGER` },
     ];
     for (const { col, ddl } of adds) {
       if (!names.has(col)) db.exec(ddl);

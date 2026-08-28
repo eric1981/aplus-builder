@@ -14,6 +14,24 @@ interface AdminUser {
   disabled: boolean;
   createdAt: string;
   taskCount: number;
+  dailyLimit: number | null;
+  monthlyLimit: number | null;
+  usage: { daily: number; monthly: number };
+}
+
+interface SettingItem {
+  key: string;
+  label: string;
+  group: string;
+  type: "number" | "boolean" | "select";
+  options?: string[];
+  env?: string;
+  default: string | number | boolean;
+  unit?: string;
+  restartRequired?: boolean;
+  description?: string;
+  value: string;
+  source: "db" | "env" | "default";
 }
 
 interface Stats {
@@ -39,7 +57,8 @@ export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
-  const [tab, setTab] = useState<"users" | "audit">("users");
+  const [settings, setSettings] = useState<SettingItem[]>([]);
+  const [tab, setTab] = useState<"users" | "audit" | "settings">("users");
 
   // 新建用户表单
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "user" as "admin" | "user" });
@@ -47,10 +66,11 @@ export default function AdminPage() {
 
   const load = useCallback(async () => {
     try {
-      const [uRes, sRes, aRes] = await Promise.all([
+      const [uRes, sRes, aRes, stRes] = await Promise.all([
         apiFetch("/api/admin/users"),
         apiFetch("/api/admin/stats"),
         apiFetch("/api/admin/audit?limit=50"),
+        apiFetch("/api/admin/settings"),
       ]);
       if (uRes.status === 403 || uRes.status === 401) {
         router.replace("/login");
@@ -59,9 +79,11 @@ export default function AdminPage() {
       const u = await uRes.json();
       const s = await sRes.json();
       const a = await aRes.json();
+      const st = await stRes.json();
       setUsers(u.users || []);
       setStats(s);
       setAudit(a.entries || []);
+      setSettings(st.settings || []);
     } catch {}
   }, [router]);
 
@@ -150,6 +172,54 @@ export default function AdminPage() {
     router.replace("/login");
   };
 
+  // 每用户配额编辑（空 = 不限）
+  const editUserQuota = async (u: AdminUser) => {
+    const daily = window.prompt(`设置 ${u.name} 的每日配额（空 = 不限）：`, u.dailyLimit == null ? "" : String(u.dailyLimit));
+    if (daily === null) return;
+    const monthly = window.prompt(`设置 ${u.name} 的每月配额（空 = 不限）：`, u.monthlyLimit == null ? "" : String(u.monthlyLimit));
+    if (monthly === null) return;
+    await patchUser(u.id, {
+      dailyLimit: daily.trim() === "" ? null : Number(daily),
+      monthlyLimit: monthly.trim() === "" ? null : Number(monthly),
+    });
+  };
+
+  // 系统设置保存（批量 PUT，仅可编辑项）
+  const saveSettings = async () => {
+    setMsg(null);
+    const editable = settings.filter((s) => !s.restartRequired);
+    const body: Record<string, string> = {};
+    for (const s of editable) body[s.key] = s.value;
+    try {
+      const res = await apiFetch("/api/admin/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg({ type: "err", text: (data.errors || []).join("；") || "保存失败" });
+        return;
+      }
+      setMsg({ type: "ok", text: `已保存 ${(data.updated || []).length} 项设置，即时生效` });
+      load();
+    } catch {
+      setMsg({ type: "err", text: "网络错误" });
+    }
+  };
+
+  const setSettingValue = (key: string, value: string) => {
+    setSettings((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)));
+  };
+
+  const GROUP_LABELS: Record<string, string> = {
+    quota: "配额",
+    concurrency: "并发与队列",
+    agent: "Agent",
+    upload: "上传",
+    system: "系统（部署级，仅环境变量生效）",
+  };
+
   if (loading || !user || user.role !== "admin") {
     return <div className="min-h-screen flex items-center justify-center text-muted text-sm">加载中…</div>;
   }
@@ -200,13 +270,64 @@ export default function AdminPage() {
 
         {/* Tab */}
         <div className="flex gap-2">
-          {(["users", "audit"] as const).map((t) => (
+          {(["users", "settings", "audit"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${tab === t ? "bg-accent text-accent-on border-accent" : "bg-white text-muted border-border"}`}>
-              {t === "users" ? "用户管理" : "审计日志"}
+              {t === "users" ? "用户管理" : t === "settings" ? "系统设置" : "审计日志"}
             </button>
           ))}
         </div>
+
+        {tab === "settings" && (
+          <div className="space-y-6">
+            {(["quota", "concurrency", "agent", "upload", "system"] as const).map((group) => {
+              const items = settings.filter((s) => s.group === group);
+              if (items.length === 0) return null;
+              return (
+                <div key={group} className="bg-white rounded-xl border border-border p-5">
+                  <h2 className="font-semibold text-sm mb-4">{GROUP_LABELS[group]}</h2>
+                  <div className="space-y-3">
+                    {items.map((s) => (
+                      <div key={s.key} className="flex flex-wrap items-center gap-3">
+                        <div className="w-56 shrink-0">
+                          <p className="text-sm">{s.label}</p>
+                          {s.description && <p className="text-xs text-text-muted">{s.description}</p>}
+                          {s.source !== "db" && (
+                            <p className="text-[11px] text-amber-600">来源：{s.source === "env" ? `环境变量 ${s.env}` : "默认值"}</p>
+                          )}
+                        </div>
+                        {s.restartRequired ? (
+                          <span className="text-sm text-text-muted">由环境变量 {s.env} 配置</span>
+                        ) : s.type === "boolean" ? (
+                          <button
+                            onClick={() => setSettingValue(s.key, s.value === "true" ? "false" : "true")}
+                            className={`px-3 py-1 rounded-lg text-sm border ${s.value === "true" ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-muted border-border"}`}>
+                            {s.value === "true" ? "开 ✓" : "关"}
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={s.value}
+                              min={group === "concurrency" ? 1 : 0}
+                              onChange={(e) => setSettingValue(s.key, e.target.value)}
+                              className="w-24 px-2 py-1 border border-border rounded-lg text-sm"
+                            />
+                            {s.unit && <span className="text-xs text-text-muted">{s.unit}</span>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex gap-3 items-center">
+              <button onClick={saveSettings} className="px-5 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand-hover">保存设置（即时生效）</button>
+              <span className="text-xs text-text-muted">并发/超时/上传等改动立即生效；路径类需环境变量配置</span>
+            </div>
+          </div>
+        )}
 
         {tab === "users" && (
           <div className="space-y-6">
@@ -237,6 +358,7 @@ export default function AdminPage() {
                     <th className="px-4 py-2">用户</th>
                     <th className="px-4 py-2">角色</th>
                     <th className="px-4 py-2">任务数</th>
+                    <th className="px-4 py-2">配额（日/月）</th>
                     <th className="px-4 py-2">状态</th>
                     <th className="px-4 py-2">创建时间</th>
                     <th className="px-4 py-2">操作</th>
@@ -251,6 +373,10 @@ export default function AdminPage() {
                       </td>
                       <td className="px-4 py-2">{u.role === "admin" ? "管理员" : "用户"}</td>
                       <td className="px-4 py-2">{u.taskCount}</td>
+                      <td className="px-4 py-2 text-xs">
+                        <span className="text-text-muted">今 {u.usage.daily}/{u.dailyLimit ?? "∞"} · 月 {u.usage.monthly}/{u.monthlyLimit ?? "∞"}</span>
+                        <button onClick={() => editUserQuota(u)} className="ml-2 text-blue-600 hover:text-blue-800">编辑</button>
+                      </td>
                       <td className="px-4 py-2">{u.disabled ? "已禁用" : "正常"}</td>
                       <td className="px-4 py-2 text-xs text-text-muted">{new Date(u.createdAt).toLocaleDateString("zh-CN")}</td>
                       <td className="px-4 py-2">

@@ -6,14 +6,11 @@ import { randomUUID } from "crypto";
 import { getCustomer } from "@/lib/customer-store";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
-import { AGENT_HOME, OUTPUT_BASE, STYLE_TIMEOUT_MS } from "@/lib/config";
+import { getAgentHome, getStyleTimeoutMs, OUTPUT_BASE } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
+import { getSettingInt, getSettingBool } from "@/lib/settings";
 
 const TEMPLATES_DIR = join(process.cwd(), "customer-templates");
-/** 风格复刻并发上限（成本保护） */
-const MAX_STYLE_CONCURRENT = parseInt(process.env.MAX_STYLE_CONCURRENT || "2", 10) || 1;
-/** 是否允许 agent 联网（AGENT_SOURCE=none 关闭） */
-const AGENT_SOURCE_WEB = (process.env.AGENT_SOURCE || "web") !== "none";
 
 type StyleTask = {
   status: "running" | "done" | "error";
@@ -35,8 +32,8 @@ export async function POST(request: NextRequest) {
   if (!checkRateLimit(clientIp(request.headers))) {
     return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
   }
-  if (activeStyleCount >= MAX_STYLE_CONCURRENT) {
-    return NextResponse.json({ error: `风格复刻并发已达上限（${MAX_STYLE_CONCURRENT}），请稍后再试` }, { status: 429 });
+  if (activeStyleCount >= getSettingInt("maxStyleConcurrent", 2)) {
+    return NextResponse.json({ error: `风格复刻并发已达上限（${getSettingInt("maxStyleConcurrent", 2)}），请稍后再试` }, { status: 429 });
   }
 
   try {
@@ -62,7 +59,7 @@ export async function POST(request: NextRequest) {
     const { buffer, ext } = validated;
 
     // 稳定性 P0：配额（日/月成本熔断）——校验通过后才消耗
-    const quota = consumeQuota();
+    const quota = consumeQuota(userId);
     if (!quota.ok) {
       return NextResponse.json({ error: quota.reason }, { status: 429 });
     }
@@ -118,7 +115,7 @@ export async function POST(request: NextRequest) {
       `cd /Users/eric`,
       `~/.hermes/hermes-agent/venv/bin/hermes -p duma -s aplus-style-creator chat \\`,
       `  -q "$(cat '${promptFile}')" \\`,
-      `  --quiet --yolo --max-turns 60${AGENT_SOURCE_WEB ? " --source web" : ""}`,
+      `  --quiet --yolo --max-turns 60${getSettingBool("agentSource") ? " --source web" : ""}`,
     ].join("\n");
 
     const scriptPath = join(TEMPLATES_DIR, `${taskId}_run.sh`);
@@ -134,8 +131,8 @@ export async function POST(request: NextRequest) {
 
     const child = spawn("/bin/bash", [scriptPath], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HOME: AGENT_HOME },
-      cwd: AGENT_HOME,
+      env: { ...process.env, HOME: getAgentHome() },
+      cwd: getAgentHome(),
     });
 
     child.stdout.on("data", (d: Buffer) => { logBuffer += d.toString(); appendFileSync(logFile, d); });
@@ -152,7 +149,7 @@ export async function POST(request: NextRequest) {
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
       if (!settled) finalize("error", undefined, "Agent 超时");
-    }, STYLE_TIMEOUT_MS);
+    }, getStyleTimeoutMs());
 
     child.on("close", (code) => {
       clearTimeout(timer);

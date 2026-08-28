@@ -1,11 +1,15 @@
 /**
- * 上传文件校验：大小限制 + 图片 magic bytes 嗅探。
+ * 上传文件校验：大小限制（设置中心 maxUploadMb 可配）+ 图片 magic bytes 嗅探。
  * 扩展名以文件真实内容为准，不信任客户端声明的 MIME type。
  */
-
-export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15MB
+import { getSettingInt } from "@/lib/settings";
 
 export type SniffedImageExt = "png" | "webp" | "jpg";
+
+/** 当前上传大小上限（字节），管理后台可改 */
+export function getMaxUploadBytes(): number {
+  return getSettingInt("maxUploadMb", 15) * 1024 * 1024;
+}
 
 /** 通过文件头判断真实图片格式，非图片返回 null */
 export function sniffImageExt(buf: Buffer): SniffedImageExt | null {
@@ -34,7 +38,7 @@ export async function validateImageBlob(
   blob: Blob,
 ): Promise<{ buffer: Buffer; ext: SniffedImageExt } | null> {
   if (!blob || blob.size <= 0) return null;
-  if (blob.size > MAX_UPLOAD_BYTES) return null;
+  if (blob.size > getMaxUploadBytes()) return null;
   const buffer = Buffer.from(await blob.arrayBuffer());
   const ext = sniffImageExt(buffer);
   if (!ext) return null;

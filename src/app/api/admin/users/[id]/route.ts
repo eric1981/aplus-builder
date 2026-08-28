@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
-import { getUserById, setUserDisabled, setUserRole, resetUserPassword, deleteUser } from "@/lib/users";
+import {
+  getUserById, setUserDisabled, setUserRole, setUserQuota, resetUserPassword, deleteUser,
+} from "@/lib/users";
 import { logAudit } from "@/lib/audit";
 
 type Params = { params: Promise<{ id: string }> };
@@ -16,7 +18,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "不能修改其他管理员" }, { status: 403 });
   }
 
-  let body: { disabled?: boolean; role?: string; password?: string };
+  let body: {
+    disabled?: boolean;
+    role?: string;
+    password?: string;
+    dailyLimit?: number | null;
+    monthlyLimit?: number | null;
+  };
   try {
     body = await request.json();
   } catch {
@@ -38,6 +46,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
       resetUserPassword(id, body.password);
       logAudit(admin.id, "admin.user_reset_password", { target: id });
+    }
+    if ("dailyLimit" in body || "monthlyLimit" in body) {
+      const dl = body.dailyLimit === undefined ? (target.dailyLimit ?? null) : body.dailyLimit;
+      const ml = body.monthlyLimit === undefined ? (target.monthlyLimit ?? null) : body.monthlyLimit;
+      setUserQuota(id, dl, ml);
+      logAudit(admin.id, "admin.user_quota", { target: id, dailyLimit: dl, monthlyLimit: ml });
     }
     return NextResponse.json({ ok: true });
   } catch (e) {

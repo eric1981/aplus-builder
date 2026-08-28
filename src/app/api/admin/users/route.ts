@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { listUsers, createUserWithPassword } from "@/lib/users";
+import { getUserQuotaUsage } from "@/lib/limits";
 import { logAudit } from "@/lib/audit";
 
 export async function GET(request: NextRequest) {
@@ -14,6 +15,9 @@ export async function GET(request: NextRequest) {
     disabled: u.disabled,
     createdAt: u.createdAt,
     taskCount: u.taskCount,
+    dailyLimit: u.dailyLimit ?? null,
+    monthlyLimit: u.monthlyLimit ?? null,
+    usage: getUserQuotaUsage(u.id),
   }));
   return NextResponse.json({ users });
 }

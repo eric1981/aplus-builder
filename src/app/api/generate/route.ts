@@ -3,12 +3,13 @@ import { spawn, type ChildProcess } from "child_process";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync, renameSync } from "fs";
 import { join, extname, dirname, relative } from "path";
 import { randomUUID } from "crypto";
-import { taskStore, type PersistedTask } from "./task-store";
+import { taskStore } from "./task-store";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
-import { AGENT_HOME, AGENT_TIMEOUT_MS, userBase } from "@/lib/config";
+import { getAgentHome, getAgentTimeoutMs, userBase } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { screenshotPage } from "@/lib/screenshot";
+import { getSettingInt, getSettingBool } from "@/lib/settings";
 
 function sanitizeProductName(description: string, taskId: string): string {
   const tid = taskId.slice(0, 8);
@@ -35,13 +36,8 @@ type Task = {
 };
 
 const tasks = new Map<string, Task>();
-const MAX_CONCURRENT = 2;
-/** 排队上限（成本保护）：超过即 429 */
-const MAX_QUEUE = parseInt(process.env.MAX_QUEUE || "20", 10) || 20;
-/** Agent 失败自动重试上限（含首次启动） */
-const MAX_AGENT_ATTEMPTS = parseInt(process.env.MAX_AGENT_ATTEMPTS || "2", 10) || 1;
-/** 是否允许 agent 联网（--source web）；AGENT_SOURCE=none 可关闭 */
-const AGENT_SOURCE_WEB = (process.env.AGENT_SOURCE || "web") !== "none";
+// 并发/队列/重试/联网等运行参数全部来自设置中心（管理后台可改，环境变量兜底）
+const curConcurrent = () => getSettingInt("maxConcurrent", 2) || 1;
 
 let activeCount = 0;
 const queue: { taskId: string; startFn: () => void }[] = [];
@@ -59,7 +55,7 @@ function updateQueuePositions() {
 }
 
 function tryProcessQueue() {
-  while (activeCount < MAX_CONCURRENT && queue.length > 0) {
+  while (activeCount < curConcurrent() && queue.length > 0) {
     const next = queue.shift()!;
     activeCount++;
     next.startFn();
@@ -97,8 +93,8 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
 
   const child = spawn("/bin/bash", [scriptPath], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, HOME: AGENT_HOME },
-    cwd: AGENT_HOME,
+    env: { ...process.env, HOME: getAgentHome() },
+    cwd: getAgentHome(),
   });
   children.set(taskId, child);
 
@@ -236,7 +232,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
   const timer = setTimeout(() => {
     child.kill("SIGTERM");
     if (!collectAndFinish()) finalize("error", undefined, "Agent 超时");
-  }, AGENT_TIMEOUT_MS);
+  }, getAgentTimeoutMs());
 
   child.stdout.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
   child.stderr.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
@@ -262,8 +258,8 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     // 自动重试：Agent 异常退出且未超过上限时，重新入队（占用新槽位）
     const record = taskStore.get(taskId);
     const attempts = record?.attempts || 1;
-    if (code !== 0 && attempts < MAX_AGENT_ATTEMPTS) {
-      console.log(`[hermes-cli] Task ${taskId} 失败（exit=${code}），自动重试 ${attempts}/${MAX_AGENT_ATTEMPTS}`);
+    if (code !== 0 && attempts < getSettingInt("maxAgentAttempts", 2)) {
+      console.log(`[hermes-cli] Task ${taskId} 失败（exit=${code}），自动重试 ${attempts}/${getSettingInt("maxAgentAttempts", 2)}`);
       taskStore.bumpAttempts(taskId);
       tasks.set(taskId, { status: "queued", log: logBuffer.slice(-2000) });
       queue.unshift({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) }); // 重试优先
@@ -503,21 +499,21 @@ export async function POST(request: NextRequest) {
       `cd /Users/eric`,
       `hermes -p duma -s ecommerce-aplus-detail chat \\`,
       `  -q "$(cat '${promptFile}')" \\`,
-      `  --quiet --yolo --max-turns 90${AGENT_SOURCE_WEB ? " --source web" : ""}`,
+      `  --quiet --yolo --max-turns 90${getSettingBool("agentSource") ? " --source web" : ""}`,
     ].join("\n");
     const scriptPath = join(workDir, "run.sh");
     writeFileSync(scriptPath, script, { mode: 0o755 });
 
     // 队列上限检查（先于配额，避免满队列时白烧配额）
-    if (activeCount >= MAX_CONCURRENT && queue.length >= MAX_QUEUE) {
+    if (activeCount >= curConcurrent() && queue.length >= getSettingInt("maxQueue", 20)) {
       return NextResponse.json(
-        { error: `任务队列已满（最多 ${MAX_QUEUE} 个排队），请稍后再试` },
+        { error: `任务队列已满（最多 ${getSettingInt("maxQueue", 20)} 个排队），请稍后再试` },
         { status: 429 },
       );
     }
 
-    // 稳定性 P0：配额（日/月成本熔断）——仅在任务校验通过、即将创建时消耗
-    const quota = consumeQuota();
+    // 稳定性 P0：配额（全局 + 每用户）——仅在任务校验通过、即将创建时消耗
+    const quota = consumeQuota(userId);
     if (!quota.ok) {
       return NextResponse.json({ error: quota.reason }, { status: 429 });
     }
@@ -526,7 +522,7 @@ export async function POST(request: NextRequest) {
     taskStore.add({
       taskId,
       userId,
-      status: activeCount >= MAX_CONCURRENT ? "queued" : "running",
+      status: activeCount >= curConcurrent() ? "queued" : "running",
       workDir,
       mode,
       customTemplateId: customTemplateId || undefined,
@@ -538,7 +534,7 @@ export async function POST(request: NextRequest) {
     logAudit(userId, "task.create", { taskId, mode, workDir });
 
     // 检查并发
-    if (activeCount >= MAX_CONCURRENT) {
+    if (activeCount >= curConcurrent()) {
       tasks.set(taskId, { status: "queued", queuePosition: 1, log: "" });
       queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) });
       updateQueuePositions();
@@ -642,7 +638,7 @@ export async function DELETE(request: NextRequest) {
       continue;
     }
 
-    if (activeCount < MAX_CONCURRENT) {
+    if (activeCount < curConcurrent()) {
       activeCount++;
       spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId);
     } else {

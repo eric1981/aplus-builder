@@ -1,10 +1,11 @@
 /**
  * Chrome 无头截图（稳定性 P1）：
  * - 由同步 spawnSync 改为异步 spawn，不再阻塞 Node 事件循环
- * - 全局并发限制（MAX_SCREENSHOT_CONCURRENT，默认 2），截图任务排队执行
+ * - 全局并发限制（设置中心 maxScreenshotConcurrent，默认 2），截图任务排队执行
  */
 import { spawn } from "child_process";
-import { CHROME_PATH } from "./config";
+import { getChromePath } from "./config";
+import { getSettingInt } from "./settings";
 
 export interface ScreenshotJob {
   /** 本地 HTML 文件绝对路径（file:// 打开） */
@@ -13,15 +14,17 @@ export interface ScreenshotJob {
   destPath: string;
 }
 
-const MAX_CONCURRENT = parseInt(process.env.MAX_SCREENSHOT_CONCURRENT || "2", 10) || 1;
-
 let active = 0;
 const jobs: { job: ScreenshotJob; resolve: (ok: boolean) => void }[] = [];
+
+function maxConcurrent(): number {
+  return getSettingInt("maxScreenshotConcurrent", 2) || 1;
+}
 
 function run(job: ScreenshotJob): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(
-      CHROME_PATH,
+      getChromePath(),
       [
         "--headless=new",
         "--disable-gpu",
@@ -46,7 +49,8 @@ export function screenshotPage(job: ScreenshotJob): Promise<boolean> {
 }
 
 function pump() {
-  while (active < MAX_CONCURRENT && jobs.length > 0) {
+  const cap = maxConcurrent();
+  while (active < cap && jobs.length > 0) {
     const { job, resolve } = jobs.shift()!;
     active++;
     run(job).then((ok) => {
