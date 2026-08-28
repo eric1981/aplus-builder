@@ -125,6 +125,7 @@ export default function OutputPage() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [rating, setRating] = useState<"liked" | "disliked" | null>(null);
 
@@ -169,7 +170,17 @@ export default function OutputPage() {
     const saved = loadState();
     // 防御：localStorage 中的旧/损坏数据可能是非数组
     if (saved?.queueItems && Array.isArray(saved.queueItems)) setQueueItems(saved.queueItems);
-    getHistory().then((d) => { if (Array.isArray(d)) setHistoryEntries(d); }).catch(() => {});
+    // 历史加载失败要显式提示，不能静默显示"还没有产出"（例如局域网访问被认证拦截）
+    apiFetch("/api/list-history")
+      .then((r) => {
+        if (!r.ok) throw new Error(`历史接口异常（HTTP ${r.status}）`);
+        return r.json();
+      })
+      .then((d) => {
+        if (d && Array.isArray(d.entries)) setHistoryEntries(d.entries);
+        else setHistoryError("历史接口返回异常");
+      })
+      .catch((e) => setHistoryError(e?.message || "历史加载失败"));
     setHydrated(true);
   }, []);
 
@@ -573,6 +584,9 @@ export default function OutputPage() {
             <div className="text-4xl mb-4">📭</div>
             <p className="text-lg font-medium">还没有产出</p>
             <p className="text-sm mt-2">去 <a href="/build" className="text-brand hover:underline">新建任务</a> 开始生成</p>
+            {historyError && (
+              <p className="text-xs text-red-500 mt-3">⚠️ 历史加载失败：{historyError}（请确认通过 localhost 访问，或刷新重试）</p>
+            )}
           </div>
         )}
       </div>
