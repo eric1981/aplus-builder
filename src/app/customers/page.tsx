@@ -41,8 +41,8 @@ export default function CustomersPage() {
   const modelRefRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    apiFetch("/api/customers").then(r => r.json()).then(setCustomers).catch(() => {});
-    apiFetch("/api/style-extract/templates").then(r => r.json()).then(d => setTemplates(d.templates || [])).catch(() => {});
+    apiFetch("/api/customers").then(r => r.json()).then(d => { if (Array.isArray(d)) setCustomers(d); }).catch(() => {});
+    apiFetch("/api/style-extract/templates").then(r => r.json()).then(d => { if (d && Array.isArray(d.templates)) setTemplates(d.templates); }).catch(() => {});
   }, []);
 
   const select = (c: Customer) => {

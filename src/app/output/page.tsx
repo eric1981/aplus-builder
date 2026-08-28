@@ -77,7 +77,19 @@ interface PreferenceProfile {
 const PROFILE_KEY = "aplus-builder-profile";
 
 function loadProfile(): PreferenceProfile {
-  try { const raw = localStorage.getItem(PROFILE_KEY); if (raw) return JSON.parse(raw); } catch {}
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p && typeof p === "object") {
+        // 防御：旧/损坏的画像数据缺少字段时归一化，避免 addSignal 崩溃
+        if (!Array.isArray(p.pending_signals)) p.pending_signals = [];
+        if (!p.stats || typeof p.stats.total !== "number") p.stats = { total: 0 };
+        if (typeof p.signal !== "string") p.signal = "";
+        return p;
+      }
+    }
+  } catch {}
   return { signal: "", pending_signals: [], stats: { total: 0 } };
 }
 function saveProfile(p: PreferenceProfile) { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {} }
@@ -155,8 +167,9 @@ export default function OutputPage() {
   // -- 水合 --
   useEffect(() => {
     const saved = loadState();
-    if (saved?.queueItems) setQueueItems(saved.queueItems);
-    getHistory().then(setHistoryEntries).catch(() => {});
+    // 防御：localStorage 中的旧/损坏数据可能是非数组
+    if (saved?.queueItems && Array.isArray(saved.queueItems)) setQueueItems(saved.queueItems);
+    getHistory().then((d) => { if (Array.isArray(d)) setHistoryEntries(d); }).catch(() => {});
     setHydrated(true);
   }, []);
 
@@ -220,7 +233,7 @@ export default function OutputPage() {
               }
               if (!savedToHistoryRef.current.has(qi.id)) {
                 savedToHistoryRef.current.add(qi.id);
-                getHistory().then(setHistoryEntries).catch(() => {});
+                getHistory().then((d) => { if (Array.isArray(d)) setHistoryEntries(d); }).catch(() => {});
               }
             } else if (task.status === "error") {
               setQueueItems((prev) =>

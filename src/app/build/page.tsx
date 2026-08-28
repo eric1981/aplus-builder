@@ -71,7 +71,19 @@ interface PreferenceProfile {
 const PROFILE_KEY = "aplus-builder-profile";
 
 function loadProfile(): PreferenceProfile {
-  try { const raw = localStorage.getItem(PROFILE_KEY); if (raw) return JSON.parse(raw); } catch {}
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p && typeof p === "object") {
+        // 防御：旧/损坏的画像数据缺少字段时归一化
+        if (!Array.isArray(p.pending_signals)) p.pending_signals = [];
+        if (!p.stats || typeof p.stats.total !== "number") p.stats = { total: 0 };
+        if (typeof p.signal !== "string") p.signal = "";
+        return p;
+      }
+    }
+  } catch {}
   return { signal: "", pending_signals: [], stats: { total: 0 } };
 }
 function getProfileContext(profile: PreferenceProfile): string {
@@ -148,10 +160,11 @@ export default function BuildPage() {
   // -- 水合 --
   useEffect(() => {
     const saved = loadState();
-    if (saved?.queueItems) setQueueItems(saved.queueItems as QueueItem[]);
-    if (saved?.preferences) setPrefs(saved.preferences);
+    // 防御：localStorage 中的旧/损坏数据可能是非数组，直接 set 会导致 .map 崩溃
+    if (saved?.queueItems && Array.isArray(saved.queueItems)) setQueueItems(saved.queueItems);
+    if (saved?.preferences && typeof saved.preferences === "object") setPrefs(saved.preferences);
     setCredits(loadCredits());
-    setProfileLoaded(loadProfile().stats.total > 0);
+    setProfileLoaded((loadProfile().stats?.total || 0) > 0);
     setHydrated(true);
   }, []);
 
@@ -159,7 +172,10 @@ export default function BuildPage() {
 
   // -- 加载客户列表 --
   useEffect(() => {
-    apiFetch("/api/customers").then((r) => r.json()).then(setCustomers).catch(() => {});
+    apiFetch("/api/customers")
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d)) setCustomers(d); })
+      .catch(() => {});
   }, []);
 
   // -- 选中客户时自动加载资产 + 偏好 --

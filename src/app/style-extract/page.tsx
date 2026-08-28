@@ -22,7 +22,7 @@ export default function StyleExtractPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    apiFetch("/api/customers").then(r => r.json()).then(setCustomers).catch(() => {});
+    apiFetch("/api/customers").then(r => r.json()).then(d => { if (Array.isArray(d)) setCustomers(d); }).catch(() => {});
   }, []);
 
   const handleImageUpload = useCallback((file: File | null) => {
