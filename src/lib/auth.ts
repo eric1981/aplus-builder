@@ -17,6 +17,8 @@ export interface AuthUser {
 }
 
 export const SESSION_COOKIE = "aplus_session";
+/** 登出标记：种下后即使 localhost 也要求重新登录（否则本地豁免会绕过登出） */
+export const LOGOUT_COOKIE = "aplus_logged_out";
 /** 会话有效期：30 天 */
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 

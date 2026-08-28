@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateUser, createSession, SESSION_COOKIE, seedAdmin } from "@/lib/auth";
+import { authenticateUser, createSession, SESSION_COOKIE, LOGOUT_COOKIE, seedAdmin } from "@/lib/auth";
 import { checkRateLimit, clientIp } from "@/lib/limits";
 import { logAudit } from "@/lib/audit";
 
@@ -43,6 +43,13 @@ export async function POST(request: NextRequest) {
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_MAX_AGE,
+  });
+  // 登录成功：清除登出标记
+  res.cookies.set(LOGOUT_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
   });
   return res;
 }

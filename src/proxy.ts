@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { findUserByToken } from "@/lib/users";
-import { getUserBySessionToken, SESSION_COOKIE } from "@/lib/auth";
+import { getUserBySessionToken, SESSION_COOKIE, LOGOUT_COOKIE } from "@/lib/auth";
 
 /**
  * 全站 /api 认证闸门（Next.js 16 的 proxy 文件约定，替代旧版 middleware）。
@@ -70,6 +70,12 @@ export function proxy(request: NextRequest) {
     return withSecurityHeaders(NextResponse.next());
   }
 
+  const isLocal = LOCAL_HOSTNAMES.has(
+    extractHostname(request.headers.get("host") || ""),
+  );
+  // 本机豁免（免登录 = admin），但登出标记存在时仍需真实登录
+  const localExempt = isLocal && !request.cookies.get(LOGOUT_COOKIE);
+
   // iframe 预览加载产出图片（img 标签无法携带 Authorization 头）——免认证，
   // 但会携带 Cookie，因此可带用户上下文实现按用户隔离
   if (pathname.startsWith("/api/output/")) {
@@ -77,15 +83,11 @@ export function proxy(request: NextRequest) {
     return allowAs(request, user?.userId || "admin");
   }
 
-  const isLocal = LOCAL_HOSTNAMES.has(
-    extractHostname(request.headers.get("host") || ""),
-  );
-
   const user = resolveUser(request);
   if (user) return allowAs(request, user.userId);
 
-  // 本机访问 = admin（本地单用户场景，行为与之前完全一致）
-  if (isLocal) {
+  // 本机访问且未登出 = admin（本地单用户场景，行为与之前完全一致）
+  if (localExempt) {
     return allowAs(request, "admin");
   }
 
