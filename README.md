@@ -56,6 +56,18 @@ npx next start -p 3000 # 启动（production 模式，ngrok 不支持 WS 所以�
 
 ## 稳定性保护（对外开放 P0+P1）
 
+### 用户登录与管理后台
+
+- **Web 登录**：邮箱 + 密码（`node:crypto` scrypt 散列，零依赖），HttpOnly + SameSite=Lax 会话 Cookie（30 天），登录限流防爆破
+- **初始管理员**：启动时若库中无管理员，自动创建：
+  - 配置了 `ADMIN_EMAIL` / `ADMIN_PASSWORD` → 用之
+  - 未配置 → 生成随机密码并在**启动日志打印一次**（请尽快在 `/admin` 重置）
+- **管理后台 `/admin`**：用户管理（创建/禁用/改角色/重置密码/删除）、配额总览、任务统计、审计日志
+- **账号来源**：默认**管理员创建**（`/admin` → 创建用户），防滥用（每个账号消耗 LLM 费用）
+- **身份链路**：会话 Cookie（或 Bearer token / localhost）→ proxy 注入 `x-user-id` → 下游数据按用户隔离
+- **`/api/output` 图片隔离**：会话 Cookie 随 iframe `<img>` 请求自动携带，多用户预览图互不可见（此前 Bearer token 无法实现的限制已解决）
+- **兼容**：原有 `AUTH_USERS` API token 认证保留，脚本调用不受影响
+
 ### 数据存储（SQLite）
 
 - 元数据全部入库 `data/app.db`（Node 24 内置 `node:sqlite`，零依赖，WAL 模式）：

@@ -178,6 +178,13 @@ export default function BuildPage() {
       .catch(() => {});
   }, []);
 
+  // -- 未登录（远程访问无会话）重定向到登录页；localhost 恒为 admin，不会触发 --
+  useEffect(() => {
+    apiFetch("/api/auth/me").then((r) => {
+      if (r.status === 401) window.location.href = "/login";
+    }).catch(() => {});
+  }, []);
+
   // -- 选中客户时自动加载资产 + 偏好 --
   useEffect(() => {
     if (!selectedCustomerId) return;

@@ -43,6 +43,8 @@ export default function CustomersPage() {
   useEffect(() => {
     apiFetch("/api/customers").then(r => r.json()).then(d => { if (Array.isArray(d)) setCustomers(d); }).catch(() => {});
     apiFetch("/api/style-extract/templates").then(r => r.json()).then(d => { if (d && Array.isArray(d.templates)) setTemplates(d.templates); }).catch(() => {});
+    // 未登录（远程访问无会话）重定向到登录页；localhost 恒为 admin，不会触发
+    apiFetch("/api/auth/me").then((r) => { if (r.status === 401) window.location.href = "/login"; }).catch(() => {});
   }, []);
 
   const select = (c: Customer) => {

@@ -97,21 +97,26 @@ class TaskStore {
 
   /** 恢复时需要重启的任务（运行中/排队中） */
   getRecoverable(): PersistedTask[] {
-    const rows = db
-      .prepare(`SELECT * FROM tasks WHERE status IN ('running','queued') ORDER BY created_at`)
-      .all() as Record<string, unknown>[];
-    return rows
-      .filter((r) => r.work_dir)
-      .map((r) => ({
-        taskId: String(r.task_id),
-        userId: String(r.user_id || "admin"),
-        status: r.status === "queued" ? ("queued" as const) : ("running" as const),
-        workDir: String(r.work_dir),
-        mode: String(r.mode || "detail"),
-        customTemplateId: r.custom_template_id ? String(r.custom_template_id) : undefined,
-        attempts: Number(r.attempts || 1),
-        createdAt: Number(r.created_at || 0),
-      }));
+    try {
+      const rows = db
+        .prepare(`SELECT * FROM tasks WHERE status IN ('running','queued') ORDER BY created_at`)
+        .all() as Record<string, unknown>[];
+      return rows
+        .filter((r) => r.work_dir)
+        .map((r) => ({
+          taskId: String(r.task_id),
+          userId: String(r.user_id || "admin"),
+          status: r.status === "queued" ? ("queued" as const) : ("running" as const),
+          workDir: String(r.work_dir),
+          mode: String(r.mode || "detail"),
+          customTemplateId: r.custom_template_id ? String(r.custom_template_id) : undefined,
+          attempts: Number(r.attempts || 1),
+          createdAt: Number(r.created_at || 0),
+        }));
+    } catch {
+      // 构建期多 worker 并发或库未就绪时返回空（运行时由 safeInit 保证可用）
+      return [];
+    }
   }
 
   /** 任务完成：更新状态与产出元数据（历史记录来源） */

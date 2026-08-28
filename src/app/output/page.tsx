@@ -170,6 +170,10 @@ export default function OutputPage() {
     const saved = loadState();
     // 防御：localStorage 中的旧/损坏数据可能是非数组
     if (saved?.queueItems && Array.isArray(saved.queueItems)) setQueueItems(saved.queueItems);
+    // 未登录（远程访问无会话）重定向到登录页；localhost 恒为 admin，不会触发
+    apiFetch("/api/auth/me").then((r) => {
+      if (r.status === 401) window.location.href = "/login";
+    }).catch(() => {});
     // 历史加载失败要显式提示，不能静默显示"还没有产出"（例如局域网访问被认证拦截）
     apiFetch("/api/list-history")
       .then((r) => {

@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { findUserByToken } from "@/lib/users";
+import { getUserBySessionToken, SESSION_COOKIE } from "@/lib/auth";
 
 /**
  * 全站 /api 认证闸门（Next.js 16 的 proxy 文件约定，替代旧版 middleware）。
  *
- * 认证与用户识别（稳定性 P1：多用户 token 体系）：
- * - Bearer token 命中用户注册表（data/users.json，可用 AUTH_USERS env 种子）→
- *   以 x-user-id 请求头注入下游路由，实现数据按用户隔离。
- * - 兼容旧配置：AUTH_TOKEN 匹配 → 视为 admin。
- * - localhost 访问 → 视为 admin（本地默认用户，数据沿用旧布局）。
- * - `/api/output/*` 豁免认证：预览 iframe 内的 <img> 无法携带 Authorization 头；
- *   该端点经路径校验后只能读取产出目录，且带 x-user-id 时按用户隔离读取。
+ * 身份解析优先级：
+ * 1. 会话 Cookie（Web 登录，HttpOnly）→ 对应用户
+ * 2. Bearer token（用户注册表 / 旧版 AUTH_TOKEN）→ 对应用户 / admin
+ * 3. localhost 访问 → admin（本地默认用户，数据沿用旧布局）
+ * 4. 其余 → 401
+ *
+ * `/api/output/*` 豁免认证（iframe 预览 <img> 无法携带 Authorization 头），
+ * 但带会话 Cookie 或 token 时按用户隔离读取 —— 解决了多用户预览图隔离问题。
  *
  * 注意：不依赖 request.nextUrl.hostname —— 在 next start 自托管模式下它会被规范化为
  * "localhost"，无法区分真实来源；原始 Host 请求头才是可靠的判断依据。
@@ -44,33 +46,43 @@ function allowAs(request: NextRequest, userId: string): NextResponse {
   );
 }
 
+/** 从请求解析登录用户：优先会话 Cookie，其次 Bearer token */
+function resolveUser(request: NextRequest): { userId: string } | null {
+  // 1) 会话 Cookie（Web 登录）
+  const sessionUser = getUserBySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+  if (sessionUser) return { userId: sessionUser.id };
+
+  // 2) Bearer token
+  const auth = request.headers.get("authorization") || "";
+  if (auth.startsWith("Bearer ")) {
+    const tokenUser = findUserByToken(auth.slice(7));
+    if (tokenUser) return { userId: tokenUser.id };
+    if (AUTH_TOKEN && auth === `Bearer ${AUTH_TOKEN}`) return { userId: "admin" };
+  }
+  return null;
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // iframe 预览加载产出图片（img 标签无法携带 Authorization 头）——免认证
+  // 登录/登出端点：自身处理认证（登录已限流），不套鉴权闸
+  if (pathname.startsWith("/api/auth/login") || pathname.startsWith("/api/auth/logout")) {
+    return withSecurityHeaders(NextResponse.next());
+  }
+
+  // iframe 预览加载产出图片（img 标签无法携带 Authorization 头）——免认证，
+  // 但会携带 Cookie，因此可带用户上下文实现按用户隔离
   if (pathname.startsWith("/api/output/")) {
-    const auth = request.headers.get("authorization") || "";
-    const tokenUser = auth.startsWith("Bearer ")
-      ? findUserByToken(auth.slice(7))
-      : null;
-    // 带有效 token 则按用户隔离，否则 admin（本地默认布局）
-    return allowAs(request, tokenUser?.id || "admin");
+    const user = resolveUser(request);
+    return allowAs(request, user?.userId || "admin");
   }
 
   const isLocal = LOCAL_HOSTNAMES.has(
     extractHostname(request.headers.get("host") || ""),
   );
 
-  // 优先：用户注册表 token
-  const auth = request.headers.get("authorization") || "";
-  if (auth.startsWith("Bearer ")) {
-    const tokenUser = findUserByToken(auth.slice(7));
-    if (tokenUser) return allowAs(request, tokenUser.id);
-    // 兼容旧配置：AUTH_TOKEN 等价于 admin
-    if (AUTH_TOKEN && auth === `Bearer ${AUTH_TOKEN}`) {
-      return allowAs(request, "admin");
-    }
-  }
+  const user = resolveUser(request);
+  if (user) return allowAs(request, user.userId);
 
   // 本机访问 = admin（本地单用户场景，行为与之前完全一致）
   if (isLocal) {
@@ -79,7 +91,7 @@ export function proxy(request: NextRequest) {
 
   return withSecurityHeaders(
     NextResponse.json(
-      { error: "Unauthorized: 请使用有效的 API token（AUTH_USERS）访问" },
+      { error: "Unauthorized: 请先登录（或使用有效的 API token）" },
       { status: 401 },
     ),
   );

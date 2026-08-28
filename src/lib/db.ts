@@ -19,27 +19,65 @@ function ensureDir() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 }
 
+/** 构建期多 worker 并发打开同一库文件时可能遇到写锁，重试等待 */
+function withRetry<T>(fn: () => T, attempts = 10): T {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/locked|busy/i.test(msg)) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+    }
+  }
+  throw lastErr;
+}
+
+function execWithRetry(database: DatabaseSync, sql: string) {
+  withRetry(() => database.exec(sql));
+}
+
 export function openDb(): DatabaseSync {
   ensureDir();
   const database = new DatabaseSync(DB_PATH);
-  database.exec("PRAGMA journal_mode = WAL;");
-  database.exec("PRAGMA foreign_keys = ON;");
+  execWithRetry(database, "PRAGMA journal_mode = WAL;");
+  execWithRetry(database, "PRAGMA foreign_keys = ON;");
   // 并发写（如 next build 多 worker 评估路由模块）时等待锁而非立即报错
-  database.exec("PRAGMA busy_timeout = 5000;");
+  execWithRetry(database, "PRAGMA busy_timeout = 5000;");
   return database;
 }
 
 export const db = openDb();
 
+/** 安全初始化：schema + 存量列升级 + 旧数据迁移，均带锁重试 */
+function safeInit() {
+  withRetry(() => initSchema());
+  withRetry(() => ensureUserColumns());
+}
+
 export function initSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
-      id         TEXT PRIMARY KEY,
-      name       TEXT NOT NULL,
-      token      TEXT NOT NULL,
-      role       TEXT NOT NULL DEFAULT 'user',
-      created_at TEXT NOT NULL
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      email         TEXT UNIQUE,
+      token         TEXT,
+      password_hash TEXT,
+      role          TEXT NOT NULL DEFAULT 'user',
+      disabled      INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      last_seen  INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
     CREATE TABLE IF NOT EXISTS customers (
       user_id           TEXT NOT NULL DEFAULT 'admin',
@@ -94,6 +132,25 @@ export function initSchema() {
       month_count INTEGER NOT NULL DEFAULT 0
     );
   `);
+}
+
+/** 存量库升级：users 表补充认证相关列（SQLite 无 ADD COLUMN IF NOT EXISTS） */
+function ensureUserColumns() {
+  try {
+    const cols = db
+      .prepare(`PRAGMA table_info(users)`)
+      .all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    const adds: { col: string; ddl: string }[] = [
+      { col: "email", ddl: `ALTER TABLE users ADD COLUMN email TEXT` },
+      { col: "token", ddl: `ALTER TABLE users ADD COLUMN token TEXT` },
+      { col: "password_hash", ddl: `ALTER TABLE users ADD COLUMN password_hash TEXT` },
+      { col: "disabled", ddl: `ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0` },
+    ];
+    for (const { col, ddl } of adds) {
+      if (!names.has(col)) db.exec(ddl);
+    }
+  } catch {}
 }
 
 // ===== 一次性迁移（旧存储 → SQLite）=====
@@ -318,4 +375,4 @@ export function ensureMigrated() {
   }
 }
 
-initSchema();
+safeInit();
