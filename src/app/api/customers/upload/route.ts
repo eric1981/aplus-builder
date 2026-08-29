@@ -18,9 +18,17 @@ export async function POST(request: NextRequest) {
   try {
     const userId = request.headers.get("x-user-id") || "admin";
     const formData = await request.formData();
-    const id = formData.get("id") as string;
-    const type = formData.get("type") as string; // "logo" or "model-ref"
-    const file = formData.get("file") as Blob | null;
+    // 前端把 id/type 放在 URL 查询参数、文件字段名为 logo/model；
+    // 这里兼容两种来源（formData 字段名兼容旧调用）
+    const id =
+      (formData.get("id") as string) || request.nextUrl.searchParams.get("id") || "";
+    const type =
+      (formData.get("type") as string) || request.nextUrl.searchParams.get("type") || "";
+    const file =
+      (formData.get("file") as Blob | null) ||
+      (formData.get("logo") as Blob | null) ||
+      (formData.get("model") as Blob | null) ||
+      null;
 
     if (!id || !type || !file) {
       return NextResponse.json({ error: "Missing id, type, or file" }, { status: 400 });
@@ -59,7 +67,8 @@ export async function POST(request: NextRequest) {
     const updated = updateCustomer(id, updates, userId);
     logAudit(userId, "customer.upload", { id, type, filename });
 
-    return NextResponse.json({ ok: true, profile: updated });
+    // 前端依赖 filename 字段刷新 UI
+    return NextResponse.json({ ok: true, filename, profile: updated });
   } catch (e) {
     return NextResponse.json({ error: errMsg(e) }, { status: 500 });
   }
