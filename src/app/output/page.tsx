@@ -47,6 +47,15 @@ interface PredictionData {
   risks?: string[];
   opportunities?: string[];
   sellPoints?: string[];
+  /** 成本核算 */
+  cost?: { estimatedProductCost?: { min?: number; max?: number }; note?: string };
+  amazonFees?: {
+    referralRate?: number;
+    estimatedReferral?: { min?: number; max?: number };
+    estimatedFba?: { min?: number; max?: number };
+    estimatedTotal?: { min?: number; max?: number };
+  };
+  profit?: { perUnit?: { min?: number; max?: number }; margin?: { min?: number; max?: number } };
   summary?: string;
 }
 
@@ -147,6 +156,10 @@ function PredictionCard({ prediction }: { prediction: { status: string; data?: P
   const badge = (label: string, val: string, color: string) => (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${color}`}>{label}：{val}</span>
   );
+  const fmtRange = (r: { min?: number; max?: number } | undefined, prefix: string) =>
+    r && (r.min != null || r.max != null)
+      ? `${prefix}${r.min ?? r.max ?? 0}${r.max != null && r.max !== r.min ? `-${r.max}` : ""}`
+      : "—";
   const list = (title: string, items: string[] | undefined, color: string) =>
     items && items.length > 0 ? (
       <div>
@@ -194,6 +207,34 @@ function PredictionCard({ prediction }: { prediction: { status: string; data?: P
           </p>
         </div>
       </div>
+
+      {/* 成本核算 */}
+      {(d.cost?.estimatedProductCost || d.profit || d.amazonFees) && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border-soft mb-3">
+          <div>
+            <p className="text-xs text-text-muted">预估到岸成本</p>
+            <p className="text-sm font-semibold">{fmtRange(d.cost?.estimatedProductCost, "$")}</p>
+          </div>
+          <div>
+            <p className="text-xs text-text-muted">亚马逊费用</p>
+            <p className="text-sm font-semibold">
+              {fmtRange(d.amazonFees?.estimatedTotal, "$")}
+              {d.amazonFees?.referralRate ? `（佣金${d.amazonFees.referralRate}%+FBA）` : ""}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-text-muted">单件毛利</p>
+            <p className="text-sm font-semibold amz-price">{fmtRange(d.profit?.perUnit, "$")}</p>
+          </div>
+          <div>
+            <p className="text-xs text-text-muted">毛利率</p>
+            <p className="text-sm font-semibold text-green-700">{fmtRange(d.profit?.margin, "")}{d.profit?.margin?.min != null ? "%" : ""}</p>
+          </div>
+          {d.cost?.note && (
+            <p className="col-span-full text-[10px] text-meta">* {d.cost.note}</p>
+          )}
+        </div>
+      )}
 
       <div className="grid sm:grid-cols-3 gap-3">
         {list("💡 卖点", d.sellPoints, "text-green-700")}

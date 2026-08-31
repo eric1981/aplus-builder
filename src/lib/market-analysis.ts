@@ -21,6 +21,15 @@ export interface MarketPrediction {
   risks: string[];
   opportunities: string[];
   sellPoints: string[];
+  /** 成本核算（可空，兼容旧数据） */
+  cost?: { estimatedProductCost?: { min?: number; max?: number }; note?: string };
+  amazonFees?: {
+    referralRate?: number;
+    estimatedReferral?: { min?: number; max?: number };
+    estimatedFba?: { min?: number; max?: number };
+    estimatedTotal?: { min?: number; max?: number };
+  };
+  profit?: { perUnit?: { min?: number; max?: number }; margin?: { min?: number; max?: number } };
   summary: string;
 }
 
@@ -132,6 +141,14 @@ export function normalizePrediction(raw: unknown): MarketPrediction | null {
     typeof v === "number" && Number.isFinite(v) ? v : d;
   const str = (v: unknown, d = "") => (typeof v === "string" ? v : d);
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+  const range = (v: unknown): { min?: number; max?: number } | undefined => {
+    if (!v || typeof v !== "object") return undefined;
+    const o = v as { min?: unknown; max?: unknown };
+    const out: { min?: number; max?: number } = {};
+    if (typeof o.min === "number" && Number.isFinite(o.min)) out.min = Math.max(0, o.min);
+    if (typeof o.max === "number" && Number.isFinite(o.max)) out.max = Math.max(0, o.max);
+    return Object.keys(out).length > 0 ? out : undefined;
+  };
   try {
     return {
       score: Math.max(0, Math.min(100, num(r.score))),
@@ -157,6 +174,26 @@ export function normalizePrediction(raw: unknown): MarketPrediction | null {
       risks: arr(r.risks),
       opportunities: arr(r.opportunities),
       sellPoints: arr(r.sellPoints),
+      cost: r.cost && typeof r.cost === "object"
+        ? {
+            estimatedProductCost: range((r.cost as any)?.estimatedProductCost),
+            note: str((r.cost as any)?.note) || undefined,
+          }
+        : undefined,
+      amazonFees: r.amazonFees && typeof r.amazonFees === "object"
+        ? {
+            referralRate: num((r.amazonFees as any)?.referralRate),
+            estimatedReferral: range((r.amazonFees as any)?.estimatedReferral),
+            estimatedFba: range((r.amazonFees as any)?.estimatedFba),
+            estimatedTotal: range((r.amazonFees as any)?.estimatedTotal),
+          }
+        : undefined,
+      profit: r.profit && typeof r.profit === "object"
+        ? {
+            perUnit: range((r.profit as any)?.perUnit),
+            margin: range((r.profit as any)?.margin),
+          }
+        : undefined,
       summary: str(r.summary),
     };
   } catch {

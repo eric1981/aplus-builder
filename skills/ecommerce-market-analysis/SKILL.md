@@ -29,6 +29,10 @@ description: 分析一款产品（亚马逊美国市场）的销售潜力，输�
    - 趋势：上升 / 平稳 / 下降（结合搜索热度、社交平台声量、时尚风向）
    - 最佳上架季节建议
 3. **价格带**：该品类在美亚的主流成交价格区间
+4. **成本核算**（Amazon US 卖家视角）：
+   - 估算同类产品的**到岸成本**（产品成本 + 头程运费，USD）——按品类经验值估算，标注"估算"
+   - **亚马逊费用**：佣金率（多数品类 15%）、按建议售价估算的佣金金额、FBA 履约费（按该品类常见尺寸/重量档位）、合计费用
+   - **毛利**：按建议售价 − 到岸成本 − 亚马逊费用，给出单件毛利区间与毛利率区间
 
 ## 输出
 
@@ -46,7 +50,21 @@ description: 分析一款产品（亚马逊美国市场）的销售潜力，输�
   "risks": ["同款竞争激烈，需差异化卖点", "面料质感未知，影响复购"],
   "opportunities": ["场景图突出垂坠感，契合当前极简风", "定价低于头部竞品 15% 有竞争力"],
   "sellPoints": ["垂坠廓形", "透气面料", "适合中东裔女性市场"],
-  "summary": "该款式需求平稳偏升，竞争中等，建议定价 $35-45，主打垂坠感与透气性，秋冬上架为佳。"
+  "cost": {
+    "estimatedProductCost": { "min": 8, "max": 15 },
+    "note": "同类产品到岸成本估算，实际请以你的采购成本为准"
+  },
+  "amazonFees": {
+    "referralRate": 15,
+    "estimatedReferral": { "min": 4.5, "max": 7.5 },
+    "estimatedFba": { "min": 4, "max": 6 },
+    "estimatedTotal": { "min": 8.5, "max": 13.5 }
+  },
+  "profit": {
+    "perUnit": { "min": 5, "max": 15 },
+    "margin": { "min": 15, "max": 35 }
+  },
+  "summary": "该款式需求平稳偏升，竞争中等，建议定价 $35-45；按到岸成本 $8-15 估算，单件毛利约 $5-15（毛利率 15%-35%），主打垂坠感与透气性，秋冬上架为佳。"
 }
 ```
 
@@ -57,8 +75,11 @@ description: 分析一款产品（亚马逊美国市场）的销售潜力，输�
 - `competition`：`low` | `medium` | `high`
 - `seasonality`：`peak` | `stable` | `declining`
 - `trend`：`rising` | `flat` | `falling`
+- `cost.estimatedProductCost`：同类产品到岸成本估算区间（USD，标注"估算"）
+- `amazonFees`：佣金率（%）、按建议售价估算的佣金金额、FBA 履约费、合计（USD）
+- `profit.perUnit`：单件毛利区间（USD）；`profit.margin`：毛利率区间（%）
 - `risks` / `opportunities` / `sellPoints`：各 1-4 条，每条一句话
-- `summary`：150 字以内的中文总结
+- `summary`：150 字以内的中文总结（含成本与毛利结论）
 
 ## 规则
 
