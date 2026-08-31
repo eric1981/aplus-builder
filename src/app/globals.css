@@ -3,9 +3,9 @@
 @import "tailwindcss";
 
 @theme {
-  /* 主品牌色 → kami accent */
+  /* 主品牌色 → 亚马逊橙 */
   --color-brand: var(--accent);
-  --color-brand-hover: var(--accent-active);
+  --color-brand-hover: var(--accent-hover);
 
   /* 表面色 */
   --color-surface: var(--bg);
@@ -15,55 +15,146 @@
   --color-text: var(--fg);
   --color-text-muted: var(--muted);
   --color-border: var(--border);
+  --color-link: var(--amz-blue);
 
-  /* 状态色 — kami 温和的语义色 */
-  --color-blue-50: #EEF2F7;
-  --color-blue-200: #D0DCE9;
-  --color-blue-500: var(--accent);
-  --color-blue-600: var(--accent);
-  --color-blue-700: var(--accent-active);
-  --color-blue-800: var(--accent-active);
+  /* 状态色（亚马逊语义色） */
+  --color-blue-50: #EDFDFE;
+  --color-blue-200: #8CE8F2;
+  --color-blue-500: #007185;
+  --color-blue-600: #007185;
+  --color-blue-700: #005f70;
+  --color-blue-800: #005f70;
 
-  --color-green-50: #F0F4EC;
-  --color-green-200: #CDDBC4;
-  --color-green-600: var(--success);
-  --color-green-700: #3A562B;
+  --color-green-50: #EAF5EF;
+  --color-green-200: #A5DCC3;
+  --color-green-600: #067d62;
+  --color-green-700: #055e4a;
 
-  --color-red-50: #F9F0EF;
-  --color-red-200: #E4C8C4;
-  --color-red-500: var(--danger);
-  --color-red-600: var(--danger);
-  --color-red-700: #6E2E25;
+  --color-red-50: #FDF3F1;
+  --color-red-200: #F4C7C0;
+  --color-red-500: #b12704;
+  --color-red-600: #b12704;
+  --color-red-700: #8f2003;
 
-  --color-yellow-50: #F8F3E4;
-  --color-yellow-200: #E8D8B4;
-  --color-yellow-600: var(--warn);
-  --color-yellow-800: var(--warn);
+  --color-yellow-50: #FDFBEA;
+  --color-yellow-200: #F7E3A8;
+  --color-yellow-600: #b12704;
+  --color-yellow-800: #7a1d03;
 
-  --color-orange-500: var(--warn);
-  --color-purple-50: #F3F0F7;
-  --color-purple-200: #D6CFE4;
-  --color-purple-600: #5B4A7A;
+  --color-orange-500: #ff9900;
+  --color-orange-600: #e8840e;
+  --color-purple-50: #F5F1FB;
+  --color-purple-200: #D9CCEE;
+  --color-purple-600: #6b4fa1;
 
-  /* 灰色系 → kami 暖灰 */
-  --color-gray-50: var(--surface);
-  --color-gray-100: var(--surface-warm);
-  --color-gray-200: var(--border);
-  --color-white: var(--surface);
+  /* 灰色系 → 亚马逊灰 */
+  --color-gray-50: #f0f2f2;
+  --color-gray-100: #f0f2f2;
+  --color-gray-200: #d5d9d9;
+  --color-white: #ffffff;
 
-  --shadow-brand\/20: 0 4px 12px rgba(27, 54, 93, 0.12);
-  --shadow-brand\/30: 0 4px 16px rgba(27, 54, 93, 0.18);
+  --shadow-brand\/20: 0 2px 8px rgba(15, 17, 17, 0.12);
+  --shadow-brand\/30: 0 2px 12px rgba(15, 17, 17, 0.18);
 }
 
 body {
-  font-family: "Charter", "Georgia", "TsangerJinKai02", "Source Han Serif SC", "Noto Serif CJK SC", serif;
+  font-family: "Inter", "Noto Sans SC", "PingFang SC", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
-/* 表单和UI元素保留无衬线 */
+/* 表单和UI元素保持无衬线 */
 input, textarea, select, button, .font-ui {
   font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
+
+/* ─── Amazon 风格工具类 ─────────────────────────────────────────── */
+
+/* 链接蓝 */
+.amz-link {
+  color: var(--amz-blue);
+  text-decoration: none;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+.amz-link:hover {
+  color: #c7511f;
+  text-decoration: underline;
+}
+
+/* 主 CTA：亚马逊橙（深字） */
+.amz-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(to bottom, #f7b733, #fc8f06);
+  border: 1px solid;
+  border-color: #a88734 #9c7e31 #846a29;
+  border-radius: 8px;
+  color: #111;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: filter var(--motion-fast) var(--ease-standard);
+}
+.amz-btn:hover { filter: brightness(0.97); }
+
+/* Add to Cart 黄按钮 */
+.amz-btn-cart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(to bottom, #f7dfa5, #f0c14b);
+  border: 1px solid;
+  border-color: #a88734 #9c7e31 #846a29;
+  border-radius: 8px;
+  color: #111;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: filter var(--motion-fast) var(--ease-standard);
+}
+.amz-btn-cart:hover { filter: brightness(0.97); }
+
+/* 白色卡片：Amazon 商品卡 */
+.amz-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: box-shadow var(--motion-base) var(--ease-standard);
+}
+.amz-card:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); }
+
+/* 输入框：亚马逊灰边 + 聚焦蓝 */
+input[type="text"], input[type="email"], input[type="password"], input[type="number"],
+textarea, select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--fg);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--amz-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 133, 0.25);
+}
+
+/* 顶部导航：亚马逊深藏青 */
+.amz-navbar {
+  background: var(--amz-navy);
+  color: #fff;
+}
+.amz-navbar a { color: #fff; text-decoration: none; }
+.amz-navbar a:hover { color: var(--accent-light); }
+
+/* 页脚：深藏青 */
+.amz-footer {
+  background: var(--amz-navy-2);
+  color: #ddd;
+}
+
+/* 价格红 */
+.amz-price { color: var(--amz-red); font-weight: 600; }

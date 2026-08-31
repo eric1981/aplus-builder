@@ -69,13 +69,6 @@ export default function Landing() {
           ))}
         </div>
       </div>
-
-      {/* Footer */}
-      <div className="text-center pb-10">
-        <p className="text-xs text-text-muted">
-          Built with Hermes Agent · 火山引擎 Ark · DeepSeek
-        </p>
-      </div>
     </div>
   );
 }
