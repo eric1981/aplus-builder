@@ -2,190 +2,178 @@
 
 Amazon A+ 电商详情页 AI 生成器，基于 Next.js 16 + Hermes Agent。
 
-用户上传产品图 → Agent 分析产品属性 → 并行生图 → 自动排版 → 输出 A+ 详情页 HTML（含 2 个风格变体）。
+用户上传产品图 → Agent 分析产品属性 → 并行生图 → 自动排版 → 输出 A+ 详情页 HTML（含 2 个风格变体），**同时并行给出该款式在 Amazon US 市场的销售潜力预测（含成本核算）**。
 
 ## 架构
 
 ```
-浏览器 (/build)                      Next.js API Route                   Hermes Agent (duma)
-┌──────────────────┐    POST     ┌──────────────────────┐    spawn     ┌────────────────────────┐
-│ 产品图 + 偏好    │ ──────────→ │ route.ts              │ ──────────→ │ ecommerce-aplus-detail  │
-│ 轮询状态         │ ←─ GET ──── │ 拼 prompt → 写 run.sh │ ←─ exit ─── │ 分析 → 生图 → 排版      │
-│ 预览 + 下载      │             │ collectAndFinish      │             │ → index.html + 变体     │
-└──────────────────┘             └──────────────────────┘             └────────────────────────┘
-                                         │
-                                         ▼
-                              ~/Downloads/aplus-builder/<产品名>/
+浏览器 (aplus-builder 前端, 亚马逊风格)
+   │  HTTP（登录 / 表单 / 展示 / 预测卡片）
+   ▼
+Next.js API Route ──spawn──► Hermes Agent (duma)
+   │  ├─ 生图任务        → ecommerce-aplus-detail skill → 图片 + A+ HTML
+   │  └─ 市场分析（并行）→ ecommerce-market-analysis skill → sales-prediction.json
+   │                       （联网调研 Amazon US + 成本核算）
+   ▼
+SQLite (data/app.db) —— 任务/客户/用户/配额/设置/审计
+产出目录 (~/Downloads/aplus-builder/) —— 图片与 HTML 交付物（磁盘）
 ```
 
-- **前端**: `~/aplus-builder/` — Next.js 16, React 19, Tailwind CSS 4, TypeScript
-- **Agent**: `hermes -p duma -s ecommerce-aplus-detail chat` — 分析图片、并行生图、排版 HTML
-- **部署**: `npm run build && npx next start -p 3000`，ngrok FRP 公网 → `cherry.sa1.tunnelfrp.com`
+- **前端**: Next.js 16, React 19, Tailwind CSS 4, TypeScript；**亚马逊风格 UI**（深藏青导航 + 橙/黄 CTA + 白卡灰边）
+- **Agent**: `hermes -p duma -s ecommerce-aplus-detail chat`（生图排版）+ `hermes -p duma -s ecommerce-market-analysis chat`（市场预测）
+- **数据**: SQLite（Node 24 内置 `node:sqlite`，零依赖）+ 磁盘媒体文件
 
 ## 快速启动
 
 ```bash
 cd ~/aplus-builder
-npm run build          # 构建
-npx next start -p 3000 # 启动（production 模式，ngrok 不支持 WS 所以不能用 dev）
+npm run build                       # 构建
+./start-server.sh                   # 稳定启动（崩溃自动重启，日志 server.log）
 ```
 
-访问 `http://localhost:3000`，首页点「✨ 开始使用」进入生成页。
+访问 `http://localhost:3000`，登录后进入生成页。（默认**严格登录模式**：所有页面都要求登录。）
 
-## 安全说明（重要）
-
-本项目所有 `/api/*` 接口由 `src/proxy.ts` 统一做访问控制：
-
-- **默认（未配置 token）**：仅允许 `localhost` / `127.0.0.1` / `::1` 访问 API；
-  通过局域网/公网 IP 的 API 请求一律返回 401。本地使用体验与之前完全一致。
-- **公网/隧道部署（如 ngrok FRP）必须配置 token**，在 `.env.local` 中同时设置：
-  ```bash
-  AUTH_TOKEN=你的随机token
-  NEXT_PUBLIC_AUTH_TOKEN=你的随机token   # 与上面相同，注入前端请求头
-  ```
-  配置后，非本机 API 请求必须携带 `Authorization: Bearer <token>`（前端自动附带）；
-  `localhost` 访问仍免 token，避免前端漏配时本地功能静默损坏。
-- `/api/output/*` 豁免认证：预览 iframe 内的 `<img>` 无法携带 Authorization 头；
-  该端点经路径校验后只能读取 `~/Downloads/aplus-builder/` 下的产出文件，不含敏感数据。
-
-其他安全加固（2025-08 安全修复）：
-- 客户 ID / 上传文件名 / 历史目录名全部做路径穿越校验（`customer-store.ts`、各 route）
-- 上传图片仅接受 PNG/JPEG/WebP 且 ≤15MB，按文件头（magic bytes）校验，不信任客户端 MIME
-- 预览 iframe 加 `sandbox`，生成的 HTML 无法访问应用同源数据（防存储型 XSS）
-- 所有 API 响应附带 `X-Content-Type-Options: nosniff`
-
-## 稳定性保护（对外开放 P0+P1）
-
-### 用户登录与管理后台
-
-- **Web 登录**：邮箱 + 密码（`node:crypto` scrypt 散列，零依赖），HttpOnly + SameSite=Lax 会话 Cookie（30 天），登录限流防爆破
-- **初始管理员**：启动时若库中无管理员，自动创建：
-  - 配置了 `ADMIN_EMAIL` / `ADMIN_PASSWORD` → 用之
-  - 未配置 → 生成随机密码并在**启动日志打印一次**（请尽快在 `/admin` 重置）
-- **管理后台 `/admin`**：用户管理（创建/禁用/改角色/重置密码/删除/**每用户配额**）、配额总览、任务统计、审计日志、**系统设置**（配额/并发/队列/Agent 联网与超时/上传大小，即时生效；路径类部署配置仅环境变量）
-- **账号来源**：默认**管理员创建**（`/admin` → 创建用户），防滥用（每个账号消耗 LLM 费用）
-- **每用户配额**：`/admin` 用户列表可设每个用户的日/月任务上限（空 = 不限，跟随全局）；全局配额在「系统设置」调整
-- **配置中心**：所有运行参数（全局配额、并发数、队列上限、重试次数、截图并发、限流、Agent 联网/超时、上传上限）存 `settings` 表，管理后台「系统设置」可改且**即时生效**，环境变量兜底
-- **身份链路**：会话 Cookie（或 Bearer token / localhost）→ proxy 注入 `x-user-id` → 下游数据按用户隔离
-- **登录模式（默认严格）**：所有页面（含本机 localhost）都要求登录，未登录访问自动跳转 `/login`。如需本机免登录开发便利，可在 `/admin`「系统设置」开启 `本机免登录（localhost = admin）`（`TRUST_LOCALHOST=1`）
-- **`/api/output` 图片隔离**：会话 Cookie 随 iframe `<img>` 请求自动携带，多用户预览图互不可见（此前 Bearer token 无法实现的限制已解决）
-- **兼容**：原有 `AUTH_USERS` API token 认证保留，脚本调用不受影响
-
-### 数据存储（SQLite）
-
-- 元数据全部入库 `data/app.db`（Node 24 内置 `node:sqlite`，零依赖，WAL 模式）：
-  - `tasks`：生成任务（运行时队列 + 历史记录一体），历史列表直接查库，不再递归扫描磁盘
-  - `customers`：客户档案（媒体文件仍在磁盘 `customers/<id>/`，库里存文件名）
-  - `users`：用户注册表（`AUTH_USERS` 种子）
-  - `audit_log`：审计日志（替代 JSONL 文件）
-  - `quota`：日/月配额计数（替代 quota.json）
-- **首次启动自动迁移**：从旧存储（`data/users.json`、`data/tasks.json`、`data/quota.json`、`data/audit.log`、`customers/` 磁盘、产出目录扫描）一次性导入，幂等
-- 媒体文件（图片、HTML 交付物）仍存磁盘
-
-### 成本/稳定性护栏（环境变量）
-
-对外公开前必须启用的护栏（默认值已兼容本地单用户）：
-
-| 环境变量 | 默认 | 作用 |
-|---|---|---|
-| `AUTH_USERS` | 空 | 多用户注册表种子（JSON 数组，见下） |
-| `AUTH_TOKEN` / `NEXT_PUBLIC_AUTH_TOKEN` | 空 | 旧版单 token 认证（等价 admin） |
-| `MAX_DAILY_TASKS` | 200 | 每日任务配额（成本熔断，耗尽返回 429） |
-| `MAX_MONTHLY_TASKS` | 2000 | 每月任务配额 |
-| `RATE_LIMIT_PER_MINUTE` | 30 | 昂贵写接口（生成/风格复刻/截图）每分钟限次 |
-| `MAX_QUEUE` | 20 | 生成任务排队上限（满返回 429） |
-| `MAX_AGENT_ATTEMPTS` | 2 | Agent 失败自动重试上限（含首次） |
-| `MAX_STYLE_CONCURRENT` | 2 | 风格复刻并发上限 |
-| `MAX_SCREENSHOT_CONCURRENT` | 2 | Chrome 截图并发上限 |
-| `AGENT_SOURCE` | `web` | 设为 `none` 可关闭 agent 联网（`--source web`） |
-| `AGENT_TIMEOUT_MINUTES` / `STYLE_TIMEOUT_MINUTES` | 20 / 10 | Agent 超时（超时阶梯第一步：分接口配置） |
-| `OUTPUT_BASE` | `~/Downloads/aplus-builder` | 产出根目录 |
-| `AGENT_HOME` | 当前用户主目录 | Agent 进程 HOME/cwd |
-| `CHROME_PATH` | macOS Chrome | 截图浏览器路径 |
-
-配套能力：
-- **任务可取消**：`DELETE /api/generate?taskId=...`（排队任务直接移除，运行中任务终止 Agent），前端「产出中心」队列项有「取消」按钮
-- **任务持久化**：任务元数据存 `<项目>/data/tasks.json`（原子写入），服务重启自动恢复；配额计数存 `data/quota.json`
-- **多用户隔离（P1）**：`AUTH_USERS='[{"id":"alice","name":"Alice","token":"tk_xxx"},...]'` 定义用户；各用户 Bearer token 经 proxy 解析后，客户档案/产出/历史按用户隔离存储：
-  - `admin`（本机访问/旧 AUTH_TOKEN）→ 沿用旧布局 `customers/`、`~/Downloads/aplus-builder/`
-  - 其他用户 → `~/Downloads/aplus-builder/<userId>/...`（含 `customers/` 子目录）
-  - 用户注册表落盘 `data/users.json`，可手动增删用户
-- **审计日志（P1）**：关键操作（任务创建/完成/取消、客户增删改、上传）追加写入 `data/audit.log`（JSONL）
-- **Chrome 截图异步化（P1）**：截图改为异步 spawn + 并发池，不再阻塞事件循环
-- **内容审核（合规待办）**：当前未接入外部内容审核服务，公开运营前需自行接入（生成内容含模特图，涉及肖像/版权合规）
-
-> 已知限制：`/api/output`（预览图片加载）对 iframe 免认证，非 admin 用户的历史预览图需后续引入 cookie 会话才能按用户隔离加载。
+首次部署管理员凭据：
+```bash
+ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=你的密码 ./start-server.sh
+```
+不配置 `ADMIN_PASSWORD` 时自动生成随机密码并打印在启动日志/`server.log` 中。
 
 ## 功能
 
 ### 生成模式
-- **详情页模式**（默认）：生成完整 A+ 详情页 + 多场景图 + 白底主图 + 3 个风格变体
+- **详情页模式**（默认）：完整 A+ 详情页 + 多场景图 + 白底主图 + 风格变体
 - **单图模式**：只生成 1 张场景图
 
+### 市场潜力预测（新增）
+- 每个生成任务**并行**自动触发市场分析（不依赖生成结果、不占生成队列）
+- 联网调研 **Amazon US**：竞品价格、竞争密度、头部评价量级、季节趋势
+- 输出（产出页「📈 市场潜力预测」卡片）：
+  - 综合评分（0-100）、预估月销区间、建议定价
+  - 竞争 / 季节 / 趋势 / 最佳上架季节
+  - **成本核算**：预估到岸成本、亚马逊费用（佣金率+FBA）、单件毛利与毛利率
+  - 卖点 / 风险 / 机会 + 中文总结
+- 需要安装分析 skill（见下「市场预测 Skill」）；并发与超时可在 `/admin` 系统设置调整
+
 ### 批量队列
-- 填一个产品 → 加入队列 → 继续填下一个 → 后台 2 并发逐个处理
-- 横向滚动队列卡片，实时状态：⏳排队 / 🔵生成中 / ✅完成 / ❌失败
+- 填一个产品 → 加入队列 → 后台多并发逐个处理（并发数可配）
+- 实时状态：⏳排队 / 🔵生成中 / ✅完成 / ❌失败；运行中可**取消**
 
 ### 客户档案系统
-- `/customers` 页面管理客户：名称、Logo、模特图、默认偏好、尺码表、特殊要求
-- `/build` 页 Header 下拉选择客户 → 自动加载客户数据并注入 prompt
+- `/customers` 管理客户：名称、Logo、模特图、默认偏好、尺码表、特殊要求
+- `/build` 页选择客户 → 自动加载数据注入 prompt
 
 ### 偏好学习
-- 三级优先级：用户选择 > 画像推断 > AI 自决
-- 每次生成后提取偏好信号，压缩后注入下次 prompt
-
-### 多版本变体
-- 一次生成产出 3 个 HTML（主输出 + 2 个风格变体），同一套图片，不同排版
+- 三级优先级：用户选择 > 画像推断 > AI 自决；偏好信号自动提取注入
 
 ### 历史 & 下载
-- IndexedDB 30 天保留，点击恢复预览
+- 历史记录存数据库（`/output` 页直接查库），点击恢复预览（含市场预测）
 - 下载：单张图片 / 单 HTML / ZIP 打包
 
-### 并发 & 持久化
-- 最多 2 个 Agent 并行，超额排队
-- `/tmp/ecommerce-tasks.json` 持久化，服务器重启自动恢复
+## 用户登录与管理后台
 
-## 输入项
+- **登录**：邮箱 + 密码（`node:crypto` scrypt 散列，零依赖），HttpOnly + SameSite=Lax 会话 Cookie（30 天），登录限流防爆破
+- **登录模式（默认严格）**：所有页面（含本机 localhost）都要求登录；如需本机免登录开发便利，可在 `/admin`「系统设置」开启 `本机免登录（localhost = admin）`（`TRUST_LOCALHOST=1`）
+- **账号来源**：默认**管理员创建**（防滥用，每个账号消耗 LLM 费用）
+- **管理后台 `/admin`**：
+  - 用户管理：创建 / 禁用 / 改角色 / 重置密码 / 删除 / **每用户配额**（日/月上限）
+  - 配额总览、任务统计、**审计日志**（谁在何时做了什么）
+  - **系统设置**：全局配额、并发/队列、Agent 联网与超时、上传上限、限流等**即时生效**
+- **身份与数据隔离**：会话 Cookie（或 Bearer token）→ proxy 注入 `x-user-id` → 客户/产出/历史按用户隔离；`/api/output` 图片随 Cookie 按用户隔离加载
 
-| 输入 | 必填 | 说明 |
-|------|------|------|
-| 产品图 | ✅ | JPG/PNG，模特穿版或平铺 |
-| 产品名称 | 否 | 输出目录优先用此命名 |
-| 产品描述 | 否 | 不填由 Agent 看图分析 |
-| 模特参考图 | 否 | 上传激活火山引擎 dressing API 虚拟换装 |
-| 品牌 Logo | 否 | PNG 透明底最佳 |
-| 风格偏好 | 否 | 6 种内置 + 14 种 Open Design |
+## 数据存储（SQLite）
+
+元数据全部入库 `data/app.db`（WAL 模式）：
+- `tasks`：生成任务（运行时队列 + 历史 + 市场预测 `prediction` 列一体）
+- `customers`：客户档案（媒体文件仍在磁盘 `customers/<id>/`）
+- `users`：用户（邮箱/密码散列/角色/配额）
+- `sessions` / `audit_log` / `quota` / `settings`：会话、审计、配额计数、配置中心
+
+首次启动自动从旧存储（JSON 文件 + 磁盘扫描）幂等迁移；**建议定期备份 `data/app.db`**（复制文件即可，最好连 `-wal`/`-shm` 一起或停机时备份）。
+
+## 配置中心（管理后台「系统设置」，环境变量兜底）
+
+三级取值：**管理后台设置（DB）> 环境变量 > 默认值**，多数改动即时生效：
+
+| 配置项 | 环境变量 | 默认 | 作用 |
+|---|---|---|---|
+| 每日/每月全局任务配额 | `MAX_DAILY_TASKS` / `MAX_MONTHLY_TASKS` | 200 / 2000 | 成本熔断（耗尽 429） |
+| 生图并发 / 排队上限 | `MAX_CONCURRENT` / `MAX_QUEUE` | 2 / 20 | 队列满 429 |
+| 失败自动重试上限 | `MAX_AGENT_ATTEMPTS` | 2 | 含首次启动 |
+| 风格复刻 / 截图 / 市场分析并发 | `MAX_STYLE_CONCURRENT` / `MAX_SCREENSHOT_CONCURRENT` / `MAX_ANALYSIS_CONCURRENT` | 2 | 各类任务并行度 |
+| 昂贵接口限流 | `RATE_LIMIT_PER_MINUTE` | 30 次/分 | 生成/复刻/截图/分析 |
+| Agent 联网 | `AGENT_SOURCE` | web | `none` 关闭 `--source web` |
+| 生图 / 复刻 / 分析超时 | `AGENT_TIMEOUT_MINUTES` / `STYLE_TIMEOUT_MINUTES` / `ANALYSIS_TIMEOUT_MINUTES` | 20 / 10 / 10 | 分钟 |
+| 单文件上传上限 | `MAX_UPLOAD_MB` | 15 | MB |
+| 本机免登录 | `TRUST_LOCALHOST` | false | 严格模式默认关 |
+| 产出根目录 | `OUTPUT_BASE` | `~/Downloads/aplus-builder` | 部署级，仅环境变量 |
+| Agent HOME / Chrome 路径 | `AGENT_HOME` / `CHROME_PATH` | 主目录 / macOS Chrome | 部署级，仅环境变量 |
+
+API 脚本调用（非浏览器）可用 `AUTH_USERS='[{"id":"alice","name":"Alice","token":"tk_xxx"}]'` 提供 Bearer token；旧版 `AUTH_TOKEN` 仍兼容（等价 admin）。
+
+## 安全
+
+- **认证**：proxy 统一鉴权闸；登录限流；会话 Cookie（HttpOnly + SameSite=Lax）
+- **路径安全**：客户 ID / 上传文件名 / 历史目录名全部路径穿越校验 + resolved 前缀兜底
+- **上传校验**：仅 PNG/JPEG/WebP 且 ≤上限，按 magic bytes 判定，不信任客户端 MIME
+- **XSS**：预览 iframe 加 `sandbox`（无 allow-same-origin），生成 HTML 无法访问应用同源数据
+- **响应头**：`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`
+- **配额与审计**：全局 + 每用户配额双重熔断；关键操作全量审计
+
+> 合规待办：生成内容含模特图，公开运营前建议接入外部内容审核服务（肖像/版权）。
+
+## 市场预测 Skill（需安装）
+
+`skills/ecommerce-market-analysis/SKILL.md`（已入库）需复制到 hermes profile：
+
+```bash
+mkdir -p ~/.hermes/profiles/duma/skills/marketing/ecommerce-market-analysis
+cp ~/aplus-builder/skills/ecommerce-market-analysis/SKILL.md \
+   ~/.hermes/profiles/duma/skills/marketing/ecommerce-market-analysis/SKILL.md
+```
 
 ## 关键约束
 
-- **SunnyNgrok 不支持 WebSocket** → 只能用 `next start`（production），不能用 `next dev`
-- **改代码必须重建重启** — route.ts 改动不会热更新
-- **服务器重启时如果正在生成 → 任务丢失**（虽然 TaskStore 会恢复，但 Agent 进程会重启从头跑）
+- **改代码必须重建重启**（`npm run build` 后重启 `start-server.sh`）
+- **服务器重启时正在生成的任务会从头重跑**（任务元数据会恢复，但 Agent 进程被中断）
+- **部署建议**：远程主机需安装 hermes + skills + LLM 凭证（仅服务器进程内），应用与 hermes 均不暴露公网，只开 Web 端口 + HTTPS 反代（Caddy/Cloudflare Tunnel）
+- **备份**：`data/app.db` + 产出目录为全部业务数据，定期备份
 
 ## 项目结构
 
 ```
 src/
+├── proxy.ts                     # 认证闸门（session/token/localhost → x-user-id）
 ├── app/
-│   ├── page.tsx                 # 首页（landing + 模板画廊）
-│   ├── build/page.tsx           # 生成页（表单 + 队列 + 预览）
-│   ├── customers/page.tsx       # 客户管理页
+│   ├── layout.tsx               # 亚马逊导航 + 深色页脚
+│   ├── page.tsx                 # 首页（landing + 画廊）
+│   ├── login/page.tsx           # 登录页
+│   ├── admin/page.tsx           # 管理后台（用户/配额/设置/审计）
+│   ├── build/output/customers/style-extract/page.tsx
 │   └── api/
-│       ├── generate/
-│       │   ├── route.ts         # 核心 API（启动 agent / 轮询 / 收集产出）
-│       │   └── task-store.ts    # 任务持久化
-│       ├── customers/route.ts   # 客户 CRUD
-│       ├── customers/assets/route.ts   # 客户图片资产
-│       └── customers/upload/route.ts   # 客户图片上传
+│       ├── auth/login|logout|me # 认证
+│       ├── admin/users|settings|stats|audit
+│       ├── generate/            # 核心（队列 + spawn agent + 并行市场分析）
+│       ├── customers/           # 客户 CRUD + 资产 + 上传
+│       └── list-history / load-output / save-history / style-extract / capture-gallery / output
+├── components/AmazonNav.tsx     # 亚马逊风格顶部导航
 ├── lib/
-│   ├── history.ts               # IndexedDB 历史记录
-│   ├── customer-store.ts        # 客户档案抽象层
-│   └── preference-constants.ts  # 共享偏好常量
-└── public/gallery/              # 模板画廊截图
+│   ├── db.ts                    # SQLite 层（schema + 迁移）
+│   ├── auth.ts / users.ts / admin.ts   # 认证与用户管理
+│   ├── settings.ts              # 配置中心（DB + env 兜底）
+│   ├── limits.ts                # 配额（全局+每用户）+ 限流
+│   ├── market-analysis.ts       # 市场预测（并行 spawn + 解析）
+│   ├── config.ts / customer-store.ts / history.ts / audit.ts
+│   └── upload-validate.ts / screenshot.ts / apiFetch.ts / auth-client.ts
+├── types/node-sqlite.d.ts       # node:sqlite 类型声明
+skills/ecommerce-market-analysis/SKILL.md   # 市场预测 skill（需安装到 hermes）
+public/gallery/                  # 画廊截图
+data/                            # app.db 等运行时数据（gitignored）
+start-server.sh                  # 稳定启动脚本（自动重启）
 ```
 
 ## 相关文档
 
 - 完整流水线：Obsidian `01-Projects/A+电商流水线/完整流水线.md`
-- Agent 技能：`~/.hermes/profiles/duma/skills/marketing/ecommerce-aplus-detail/SKILL.md` (v33)
-- 前端开发指南：`~/.hermes/skills/software-development/aplus-builder-dev/SKILL.md`
+- Agent 生图技能：`~/.hermes/profiles/duma/skills/marketing/ecommerce-aplus-detail/SKILL.md`
+- Agent 市场分析技能：`~/.hermes/profiles/duma/skills/marketing/ecommerce-market-analysis/SKILL.md`
