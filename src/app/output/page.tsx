@@ -32,6 +32,22 @@ interface QueueItem {
   error?: string;
   agentLog?: string;
   completedAt?: number;
+  /** 市场潜力预测 */
+  prediction?: { status: "running" | "done" | "error"; data?: PredictionData | null; error?: string };
+}
+
+interface PredictionData {
+  score: number;
+  unitsPerMonth?: { min: number; max: number };
+  priceRange?: { min: number; max: number; currency?: string };
+  competition?: "low" | "medium" | "high";
+  seasonality?: "peak" | "stable" | "declining";
+  trend?: "rising" | "flat" | "falling";
+  bestSeason?: string;
+  risks?: string[];
+  opportunities?: string[];
+  sellPoints?: string[];
+  summary?: string;
 }
 
 interface SavedState {
@@ -105,6 +121,96 @@ function addSignal(profile: PreferenceProfile, signal: string): PreferenceProfil
 
 // ===== 工具 =====
 
+/** 市场潜力预测卡片 */
+function PredictionCard({ prediction }: { prediction: { status: string; data?: PredictionData | null; error?: string } | null | undefined }) {
+  if (!prediction) return null;
+  if (prediction.status === "running") {
+    return (
+      <div className="mt-4 p-4 border border-border rounded-xl bg-white">
+        <p className="text-sm font-semibold mb-2">📈 市场潜力预测</p>
+        <div className="flex items-center gap-2 text-xs text-text-muted">
+          <span className="w-3 h-3 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+          正在联网分析 Amazon US 市场…
+        </div>
+      </div>
+    );
+  }
+  const d = prediction.data;
+  if (!d) {
+    return (
+      <div className="mt-4 p-4 border border-border rounded-xl bg-white">
+        <p className="text-sm font-semibold mb-1">📈 市场潜力预测</p>
+        <p className="text-xs text-text-muted">暂无预测数据{prediction.error ? `（${prediction.error}）` : ""}</p>
+      </div>
+    );
+  }
+  const badge = (label: string, val: string, color: string) => (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${color}`}>{label}：{val}</span>
+  );
+  const list = (title: string, items: string[] | undefined, color: string) =>
+    items && items.length > 0 ? (
+      <div>
+        <p className={`text-xs font-semibold ${color} mb-1`}>{title}</p>
+        <ul className="space-y-1 text-xs text-text-muted">
+          {items.map((it, i) => (
+            <li key={i} className="flex gap-1.5"><span className="shrink-0">·</span><span>{it}</span></li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
+
+  return (
+    <div className="mt-4 p-4 border border-border rounded-xl bg-white amz-card">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <p className="text-sm font-semibold">📈 市场潜力预测（Amazon US）</p>
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
+          style={{ background: d.score >= 70 ? "#eaf5ef" : d.score >= 45 ? "#fdfbea" : "#fdf3f1", color: d.score >= 70 ? "#067d62" : d.score >= 45 ? "#8a6b1f" : "#b12704" }}>
+          综合评分 {d.score}/100
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+        <div>
+          <p className="text-xs text-text-muted">预估月销</p>
+          <p className="text-sm font-semibold">{d.unitsPerMonth?.min != null ? `${d.unitsPerMonth.min}-${d.unitsPerMonth.max ?? d.unitsPerMonth.min} 件` : "—"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted">建议定价</p>
+          <p className="text-sm font-semibold amz-price">{d.priceRange?.min != null ? `${d.priceRange.currency || "$"}${d.priceRange.min}-${d.priceRange.max ?? d.priceRange.min}` : "—"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted">竞争 / 季节</p>
+          <p className="text-sm font-semibold">
+            {d.competition === "high" ? "竞争高" : d.competition === "low" ? "竞争低" : "竞争中"}
+            {" · "}
+            {d.seasonality === "peak" ? "旺季" : d.seasonality === "declining" ? "淡季" : "平稳"}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted">趋势 / 最佳季节</p>
+          <p className="text-sm font-semibold">
+            {d.trend === "rising" ? "↑ 上升" : d.trend === "falling" ? "↓ 下降" : "→ 平稳"}
+            {d.bestSeason ? ` · ${d.bestSeason}` : ""}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid sm:grid-cols-3 gap-3">
+        {list("💡 卖点", d.sellPoints, "text-green-700")}
+        {list("⚠️ 风险", d.risks, "text-red-600")}
+        {list("🚀 机会", d.opportunities, "text-blue-700")}
+      </div>
+
+      {d.summary && (
+        <p className="mt-3 pt-3 border-t border-border-soft text-xs text-text-muted leading-relaxed">
+          {d.summary}
+        </p>
+      )}
+      <p className="mt-2 text-[10px] text-meta">预测基于联网调研与经验推断，仅供参考，不构成销售承诺。</p>
+    </div>
+  );
+}
+
 function formatTime(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
@@ -132,6 +238,7 @@ export default function OutputPage() {
   // 独立于队列的预览状态（历史恢复不加入队列）
   const [preview, setPreview] = useState<{
     html: string; images: TaskImage[]; variants: TaskVariant[]; title: string;
+    prediction?: { status: string; data?: PredictionData | null; error?: string } | null;
   } | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -238,6 +345,7 @@ export default function OutputPage() {
                 prev.map((p) =>
                   p.id === qi.id
                     ? { ...p, status: "done", html: task.html, images: task.images || [], variants: task.variants || [],
+                        prediction: task.prediction,
                         completedAt: Date.now(), productName: task.productName || p.productName }
                     : p
                 )
@@ -378,6 +486,7 @@ export default function OutputPage() {
       images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })),
       variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, entry.dirName) })) || [],
       title: entry.dirName,
+      prediction: data.prediction ? { status: "done", data: data.prediction as unknown as PredictionData } : null,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -389,6 +498,7 @@ export default function OutputPage() {
       images: item.images || [],
       variants: item.variants || [],
       title: item.productName || item.id.slice(-8),
+      prediction: item.prediction || null,
     });
   };
 
@@ -499,6 +609,9 @@ export default function OutputPage() {
                 </div>
               )}
             </div>
+
+            {/* 市场潜力预测（并行分析结果） */}
+            <PredictionCard prediction={preview.prediction} />
           </div>
         )}
 

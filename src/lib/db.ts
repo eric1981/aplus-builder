@@ -55,6 +55,7 @@ export const db = openDb();
 function safeInit() {
   withRetry(() => initSchema());
   withRetry(() => ensureUserColumns());
+  withRetry(() => ensureTasksColumns());
 }
 
 export function initSchema() {
@@ -113,6 +114,7 @@ export function initSchema() {
       custom_template_id TEXT,
       attempts          INTEGER NOT NULL DEFAULT 1,
       error             TEXT,
+      prediction        TEXT,
       created_at        INTEGER NOT NULL,
       updated_at        INTEGER NOT NULL
     );
@@ -134,6 +136,18 @@ export function initSchema() {
       month_count INTEGER NOT NULL DEFAULT 0
     );
   `);
+}
+
+/** 存量库升级：tasks 表补充预测列 */
+function ensureTasksColumns() {
+  try {
+    const cols = db
+      .prepare(`PRAGMA table_info(tasks)`)
+      .all() as { name: string }[];
+    if (!cols.some((c) => c.name === "prediction")) {
+      db.exec(`ALTER TABLE tasks ADD COLUMN prediction TEXT`);
+    }
+  } catch {}
 }
 
 /** 存量库升级：users 表补充认证相关列（SQLite 无 ADD COLUMN IF NOT EXISTS） */

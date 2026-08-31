@@ -161,6 +161,43 @@ class TaskStore {
     );
   }
 
+  /** 保存市场预测（JSON 字符串） */
+  updatePrediction(taskId: string, prediction: unknown | null) {
+    db.prepare(`UPDATE tasks SET prediction = ?, updated_at = ? WHERE task_id = ?`).run(
+      prediction ? JSON.stringify(prediction) : null,
+      Date.now(),
+      taskId,
+    );
+  }
+
+  /** 读取任务的市场预测（原始 JSON 对象；无则 null） */
+  getPrediction(taskId: string): Record<string, unknown> | null {
+    try {
+      const row = db
+        .prepare(`SELECT prediction FROM tasks WHERE task_id = ?`)
+        .get(taskId) as { prediction: string | null } | undefined;
+      if (!row?.prediction) return null;
+      return JSON.parse(row.prediction);
+    } catch {
+      return null;
+    }
+  }
+
+  /** 按产出目录名读取预测（历史恢复用） */
+  getPredictionByDir(dirName: string): Record<string, unknown> | null {
+    try {
+      const row = db
+        .prepare(
+          `SELECT prediction FROM tasks WHERE dir_name = ? ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get(dirName) as { prediction: string | null } | undefined;
+      if (!row?.prediction) return null;
+      return JSON.parse(row.prediction);
+    } catch {
+      return null;
+    }
+  }
+
   /** 某用户的历史（已完成且有产出的任务） */
   listHistory(userId: string): HistoryTask[] {
     ensureMigrated(); // 首次查询时执行旧数据迁移

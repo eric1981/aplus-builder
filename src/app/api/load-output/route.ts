@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, existsSync } from "fs";
 import { join, resolve, sep } from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { userBase } from "@/lib/config";
+import { taskStore } from "@/app/api/generate/task-store";
 
 export async function GET(req: NextRequest) {
   const dirName = req.nextUrl.searchParams.get("dir");
@@ -69,7 +70,12 @@ export async function GET(req: NextRequest) {
       html: readFileSync(join(dirPath, f), "utf-8"),
     }));
 
-    return NextResponse.json({ html, images, variants });
+    return NextResponse.json({
+      html,
+      images,
+      variants,
+      prediction: taskStore.getPredictionByDir(dirName),
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

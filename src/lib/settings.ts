@@ -34,11 +34,13 @@ export const SETTING_DEFS: SettingDef[] = [
   { key: "maxAgentAttempts", label: "Agent 失败自动重试上限", group: "concurrency", type: "number", env: "MAX_AGENT_ATTEMPTS", default: 2, unit: "次", description: "含首次启动" },
   { key: "maxStyleConcurrent", label: "风格复刻并发上限", group: "concurrency", type: "number", env: "MAX_STYLE_CONCURRENT", default: 2, unit: "个" },
   { key: "maxScreenshotConcurrent", label: "Chrome 截图并发上限", group: "concurrency", type: "number", env: "MAX_SCREENSHOT_CONCURRENT", default: 2, unit: "个" },
+  { key: "maxAnalysisConcurrent", label: "市场分析并发上限", group: "concurrency", type: "number", env: "MAX_ANALYSIS_CONCURRENT", default: 2, unit: "个", description: "与生图并行，不占生成队列" },
   { key: "rateLimitPerMinute", label: "昂贵接口每分钟限次", group: "concurrency", type: "number", env: "RATE_LIMIT_PER_MINUTE", default: 30, unit: "次/分", description: "生成/风格复刻/截图等接口的限流" },
   // Agent
   { key: "agentSource", label: "Agent 联网（--source web）", group: "agent", type: "boolean", env: "AGENT_SOURCE", default: true, description: "关闭后 agent 不联网抓取" },
   { key: "agentTimeoutMinutes", label: "生图 Agent 超时", group: "agent", type: "number", env: "AGENT_TIMEOUT_MINUTES", default: 20, unit: "分钟" },
   { key: "styleTimeoutMinutes", label: "风格复刻超时", group: "agent", type: "number", env: "STYLE_TIMEOUT_MINUTES", default: 10, unit: "分钟" },
+  { key: "analysisTimeoutMinutes", label: "市场分析超时", group: "agent", type: "number", env: "ANALYSIS_TIMEOUT_MINUTES", default: 10, unit: "分钟" },
   // 上传
   { key: "maxUploadMb", label: "单文件上传上限", group: "upload", type: "number", env: "MAX_UPLOAD_MB", default: 15, unit: "MB" },
   // 登录与安全

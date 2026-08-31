@@ -10,6 +10,7 @@ import { getAgentHome, getAgentTimeoutMs, userBase } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { screenshotPage } from "@/lib/screenshot";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
+import { startMarketAnalysis, normalizePrediction, type MarketPrediction } from "@/lib/market-analysis";
 
 function sanitizeProductName(description: string, taskId: string): string {
   const tid = taskId.slice(0, 8);
@@ -33,6 +34,12 @@ type Task = {
   error?: string;
   log?: string;
   queuePosition?: number;
+  /** 市场潜力预测（并行运行，不阻塞生成） */
+  prediction?: {
+    status: "running" | "done" | "error";
+    data?: MarketPrediction | null;
+    error?: string;
+  };
 };
 
 const tasks = new Map<string, Task>();
@@ -532,6 +539,28 @@ export async function POST(request: NextRequest) {
 
     // 审计：任务创建
     logAudit(userId, "task.create", { taskId, mode, workDir });
+
+    // ---- 并行市场潜力预测（不依赖生成结果，不占生成队列）----
+    const marketInput = [
+      `请分析这款产品在 Amazon US 市场的销售潜力。`,
+      ``,
+      `产品图：${imgPath}`,
+      `品类：${category || "（未指定，请看图判断）"}`,
+      `产品描述：${description || "（未提供，请结合产品图推断）"}`,
+      `风格参考：${styleLabel[uiPrefs.style || ""] || uiPrefs.style || "自动"}`,
+      ...(customerRequirements ? [`客户要求：${customerRequirements}`] : []),
+      ``,
+      `请按 ecommerce-market-analysis skill 的要求，联网调研后把预测 JSON 写入：`,
+      join(workDir, "sales-prediction.json"),
+    ].join("\n");
+    const taskForPred = tasks.get(taskId);
+    if (taskForPred) taskForPred.prediction = { status: "running" };
+    startMarketAnalysis(workDir, marketInput, (pred) => {
+      const cur = tasks.get(taskId);
+      const normalized = normalizePrediction(pred);
+      if (cur) cur.prediction = { status: "done", data: normalized };
+      taskStore.updatePrediction(taskId, normalized);
+    });
 
     // 检查并发
     if (activeCount >= curConcurrent()) {
