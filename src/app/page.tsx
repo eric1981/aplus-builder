@@ -25,11 +25,6 @@ export default function Landing() {
         >
           ✨ 开始使用
         </Link>
-        <div className="mt-4">
-          <Link href="/customers" className="text-xs sm:text-sm text-text-muted hover:text-brand transition-colors">
-            👤 管理客户资料
-          </Link>
-        </div>
       </div>
 
       {/* 三步流程 */}

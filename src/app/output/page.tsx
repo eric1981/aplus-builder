@@ -273,6 +273,20 @@ export default function OutputPage() {
   const [hydrated, setHydrated] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+
+  // 历史分页（每页条数）
+  const HISTORY_PAGE_SIZE = 8;
+  const [historyPage, setHistoryPage] = useState(1);
+  const sortedHistory = useMemo(
+    () => [...historyEntries].sort((a, b) => b.timestamp - a.timestamp),
+    [historyEntries],
+  );
+  const historyTotalPages = Math.max(1, Math.ceil(sortedHistory.length / HISTORY_PAGE_SIZE));
+  const effectiveHistoryPage = Math.min(historyPage, historyTotalPages);
+  const pagedHistory = sortedHistory.slice(
+    (effectiveHistoryPage - 1) * HISTORY_PAGE_SIZE,
+    effectiveHistoryPage * HISTORY_PAGE_SIZE,
+  );
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [rating, setRating] = useState<"liked" | "disliked" | null>(null);
 
@@ -714,7 +728,7 @@ export default function OutputPage() {
           <div>
             <h2 className="text-base sm:text-lg font-semibold mb-3">历史记录（{historyEntries.length}）</h2>
             <div className="space-y-2">
-              {[...historyEntries].sort((a, b) => b.timestamp - a.timestamp).map((entry) => (
+              {pagedHistory.map((entry) => (
                 <div key={entry.dirName} className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow group">
                   <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
                     {entry.firstImage ? (
@@ -733,6 +747,25 @@ export default function OutputPage() {
                 </div>
               ))}
             </div>
+            {historyTotalPages > 1 && (
+              <div className="flex items-center justify-center gap-4 mt-4 text-sm">
+                <button
+                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                  disabled={effectiveHistoryPage <= 1}
+                  className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ‹ 上一页
+                </button>
+                <span className="text-xs text-text-muted">第 {effectiveHistoryPage} / {historyTotalPages} 页</span>
+                <button
+                  onClick={() => setHistoryPage((p) => Math.min(historyTotalPages, p + 1))}
+                  disabled={effectiveHistoryPage >= historyTotalPages}
+                  className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  下一页 ›
+                </button>
+              </div>
+            )}
           </div>
         )}
 
