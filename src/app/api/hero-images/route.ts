@@ -19,8 +19,7 @@ function outputUrl(absPath: string): string {
   return `/api/output/${rel.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/** 扫描任务目录，收集模特场景图（文件名 scene 后跟数字，如 scene-01 / scene_02），
- *  排除 qc_/hanging/whitebg 等非模特场景图；兼容 output/ 子目录与根目录结构 */
+/** 扫描任务目录，收集模特场景图（scene-01 等）；兼容 output/ 子目录与根目录结构 */
 function collectSceneImages(workDir: string): string[] {
   const out: string[] = [];
   const candidates = [join(workDir, "output"), workDir];
@@ -32,6 +31,27 @@ function collectSceneImages(workDir: string): string[] {
           /\.(jpg|jpeg|png|webp)$/i.test(f) &&
           /scene[\s_-]*\d+/i.test(f) && // scene-01 / scene_02 / scene 1
           !/qc|hanging|whitebg|detail|hero/i.test(f) // 排除质检/挂拍/白底/细节/首图
+        ) {
+          out.push(join(dir, f));
+        }
+      }
+    } catch {}
+  }
+  return out;
+}
+
+/** 扫描任务目录，收集 hero 首图（xxx-hero.jpg 等） */
+function collectHeroImages(workDir: string): string[] {
+  const out: string[] = [];
+  const candidates = [join(workDir, "output"), workDir];
+  for (const dir of candidates) {
+    if (!existsSync(dir)) continue;
+    try {
+      for (const f of readdirSync(dir)) {
+        if (
+          /\.(jpg|jpeg|png|webp)$/i.test(f) &&
+          /hero/i.test(f) &&
+          !/scene|qc|hanging|whitebg/i.test(f)
         ) {
           out.push(join(dir, f));
         }
@@ -58,23 +78,35 @@ export async function GET(req: NextRequest) {
       )
       .all(userId, Math.max(count * 3, 12)) as { work_dir: string }[];
 
-    // 每个任务优先取 1 张 scene 图（避免同一件衣服的多个场景重复展示），
-    // 池子不足 count 时用同一任务的其他 scene 图补足，保证悬浮位满员
-    const pool: string[] = [];
-    const perTask: string[][] = [];
+    // 每个任务优先取 1 张（scene 模特场景图优先，无 scene 则该任务退而用 hero 首图），
+    // 池子不足 count 时补足：先补其他任务的 hero 图，再补同任务剩余 scene 图。
+    // 保证悬浮位满员的同时，尽量让 6 张来自不同任务。
+    const tasks: { scenes: string[]; heros: string[] }[] = [];
     for (const r of rows) {
       const scenes = collectSceneImages(r.work_dir);
-      if (scenes.length > 0) perTask.push(scenes);
+      const heros = collectHeroImages(r.work_dir);
+      if (scenes.length > 0 || heros.length > 0) tasks.push({ scenes, heros });
     }
-    // 第一轮：每任务随机 1 张
-    for (const scenes of perTask) {
-      pool.push(scenes[Math.floor(Math.random() * scenes.length)]);
+    const pool: string[] = [];
+    // 第一轮：每任务 1 张（scene 优先）
+    for (const t of tasks) {
+      const src = t.scenes.length > 0
+        ? t.scenes[Math.floor(Math.random() * t.scenes.length)]
+        : t.heros[Math.floor(Math.random() * t.heros.length)];
+      pool.push(src);
     }
-    // 补足轮：池子不足 count 时，从剩余 scene 图里随机补（此时才允许同款多张）
-    const rest = perTask.flatMap((s) => s);
-    while (pool.length < count && rest.length > 0) {
-      const i = Math.floor(Math.random() * rest.length);
-      const img = rest.splice(i, 1)[0];
+    // 补足轮 1：其他任务的 hero 图
+    const heroRest = tasks.flatMap((t) => t.heros);
+    while (pool.length < count && heroRest.length > 0) {
+      const i = Math.floor(Math.random() * heroRest.length);
+      const img = heroRest.splice(i, 1)[0];
+      if (!pool.includes(img)) pool.push(img);
+    }
+    // 补足轮 2：同任务剩余 scene 图（此时才允许同款多张）
+    const sceneRest = tasks.flatMap((t) => t.scenes);
+    while (pool.length < count && sceneRest.length > 0) {
+      const i = Math.floor(Math.random() * sceneRest.length);
+      const img = sceneRest.splice(i, 1)[0];
       if (!pool.includes(img)) pool.push(img);
     }
     // Fisher-Yates 随机挑
