@@ -14,7 +14,7 @@ export interface HistoryEntry {
 
 export interface LoadedOutput {
   html: string;
-  images: { name: string; base64: string; mime: string }[];
+  images: { name: string; base64: string; mime: string; path?: string }[];
   variants: { name: string; html: string }[];
   /** 市场潜力预测（原始 JSON，可能为空） */
   prediction?: Record<string, unknown> | null;

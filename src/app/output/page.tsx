@@ -17,7 +17,7 @@ if (typeof window !== "undefined") {
 
 // ===== 类型 =====
 
-type TaskImage = { name: string; base64: string; mime: string };
+type TaskImage = { name: string; base64: string; mime: string; path?: string };
 type TaskVariant = { name: string; html: string };
 
 interface QueueItem {
@@ -382,7 +382,7 @@ export default function OutputPage() {
       if (!match) continue;
       loadOutput(match.dirName).then((data) => {
         if (!data?.html) return;
-        const imgs = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
+        const imgs = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime, path: img.path }));
         setQueueItems((prev) =>
           prev.map((p) =>
             p.id === item.id
@@ -459,7 +459,7 @@ export default function OutputPage() {
                 setHistoryEntries(entries);
                 const data = await loadOutput(match.dirName);
                 if (data?.html) {
-                  const imgs = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
+                  const imgs = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime, path: img.path }));
                   setQueueItems((prev) =>
                     prev.map((p) =>
                       p.id === qi.id
@@ -525,7 +525,17 @@ export default function OutputPage() {
     a.href = `data:${mime};base64,${base64}`; a.download = filename; a.click();
   };
 
-  const handleDownloadImage = (img: TaskImage) => downloadDataUrl(img.base64, img.mime, img.name);
+  // 单图下载：优先原图 URL（浏览器直接下载高清原图），否则回退 base64 缩略图
+  const handleDownloadImage = (img: TaskImage) => {
+    if (img.path) {
+      const a = document.createElement("a");
+      a.href = outputImageUrl(img.path);
+      a.download = img.name;
+      a.click();
+      return;
+    }
+    downloadDataUrl(img.base64, img.mime, img.name);
+  };
 
   const handleDownloadAll = async () => {
     if (!preview) return;
@@ -544,7 +554,16 @@ export default function OutputPage() {
         setDownloadProgress(0); worker.terminate();
       }
     };
-    worker.postMessage({ images: preview.images || [], html: preview.html });
+    // zip 打包：优先原图 URL（worker 内 fetch 原图），无 path 时回退 base64
+    worker.postMessage({
+      images: preview.images?.map((img) => ({
+        name: img.name,
+        base64: img.base64,
+        mime: img.mime,
+        url: img.path ? outputImageUrl(img.path) : undefined,
+      })) || [],
+      html: preview.html,
+    });
   };
 
   const handleRate = (dir: "liked" | "disliked") => {
@@ -565,7 +584,7 @@ export default function OutputPage() {
         setPreviewError(`预览加载失败：未找到产出数据（${entry.dirName}）`);
         return;
       }
-      const images = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
+      const images = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime, path: img.path }));
       setPreview({
         // 图片直接内嵌 base64，iframe 不再依赖 /api/output 网络请求（沙箱内可能丢 cookie 导致 404）
         html: embedPreviewImages(data.html, images),

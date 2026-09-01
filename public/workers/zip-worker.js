@@ -2,7 +2,8 @@
  * ZIP 打包 Web Worker
  *
  * 在后台线程生成 ZIP，避免 5MB+ 数据阻塞主线程 UI。
- * 用法：postMessage({ images: [{name, base64}], html: string })
+ * 用法：postMessage({ images: [{name, base64?, url?}], html: string })
+ *   - url 存在时 fetch 原图（高清下载）；否则用 base64（缩略图回退）
  * 接收：{ type: "progress", processed, total, percent? }
  *       { type: "complete", blob: Blob }
  *       { type: "error", error: string }
@@ -26,7 +27,21 @@ self.onmessage = async function (e) {
     // 添加图片（分批报告进度）
     for (let i = 0; i < total; i++) {
       const img = images[i];
-      zip.file(img.name, img.base64, { base64: true });
+      if (img.url) {
+        // 原图 URL：worker 内 fetch（同源请求带 cookie），失败则回退 base64
+        try {
+          const res = await fetch(img.url);
+          if (res.ok) {
+            const blob = await res.blob();
+            zip.file(img.name, blob);
+            self.postMessage({ type: "progress", processed: i + 1, total });
+            continue;
+          }
+        } catch {}
+      }
+      if (img.base64) {
+        zip.file(img.name, img.base64, { base64: true });
+      }
       self.postMessage({ type: "progress", processed: i + 1, total });
     }
 
