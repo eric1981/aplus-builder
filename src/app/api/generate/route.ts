@@ -128,6 +128,10 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
       });
     } else {
       taskStore.markError(taskId, errMsg || "任务失败");
+      // 失败审计（"任务已取消"已在 DELETE 审计，不重复记录）
+      if (errMsg !== "任务已取消") {
+        logAudit(userId, "task.error", { taskId, error: errMsg || "任务失败" });
+      }
     }
     releaseSlot();
   };
@@ -632,6 +636,7 @@ export async function DELETE(request: NextRequest) {
     if (!existsSync(join(t.workDir, "run.sh"))) {
       tasks.set(t.taskId, { status: "error", error: "任务数据已丢失", log: "" });
       taskStore.remove(t.taskId);
+      logAudit(t.userId, "task.error", { taskId: t.taskId, error: "任务数据已丢失（恢复时）" });
       continue;
     }
 
@@ -656,11 +661,14 @@ export async function DELETE(request: NextRequest) {
         firstImage,
         variantNames: [],
       });
+      logAudit(t.userId, "task.done", { taskId: t.taskId, recovered: true, images: imageCount });
       console.log(`[hermes-cli] ✅ 恢复时发现已完成：${t.workDir}`);
       continue;
     }
 
     tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", log: "" });
+    // 恢复重新拉起 Agent 的审计
+    logAudit(t.userId, "task.resume", { taskId: t.taskId, workDir: t.workDir });
 
     if (t.status === "queued") {
       queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId) });
