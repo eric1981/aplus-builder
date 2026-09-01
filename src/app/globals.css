@@ -178,5 +178,25 @@ input:focus, textarea:focus, select:focus {
   }
 }
 
+/* ─── 横向无限轮播（wearview 风格）───────────────
+ * 内容复制两份，flex 布局整体左移 50% 后无缝循环；
+ * hover 暂停便于查看，移动端可横向滑动。 */
+.animate-scroll-left {
+  animation: scroll-left 30s linear infinite;
+}
+
+.scroller-paused:hover .animate-scroll-left {
+  animation-play-state: paused;
+}
+
+@keyframes scroll-left {
+  0% {
+    transform: translate(0);
+  }
+  100% {
+    transform: translate(-50%);
+  }
+}
+
 /* 价格红 */
 .amz-price { color: var(--amz-red); font-weight: 600; }

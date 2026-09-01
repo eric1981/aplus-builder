@@ -51,6 +51,10 @@ export interface BrandTheme {
   steps: { step: string; title: string; desc: string }[];
   /** 首页特性 */
   features: { label: string; value: string; sub: string }[];
+  /** 横向作品轮播（hero 下方，展示产出场景图）；默认开启 */
+  showScroller?: boolean;
+  /** 轮播 fallback 图（动态拉取失败时用） */
+  scrollerImages?: string[];
   /** 页脚版权行 */
   copyright: string;
 }
@@ -95,6 +99,7 @@ const DEFAULT_THEME: BrandTheme = {
     { label: "AI 偏好学习", value: "自动", sub: "越用越懂你" },
     { label: "输出格式", value: "HTML+图", sub: "直接上传 Amazon" },
   ],
+  showScroller: true,
   copyright: "面向 Amazon 卖家的 AI 视觉内容工具",
 };
 
@@ -144,6 +149,7 @@ const CUSTOMER_THEMES: Record<string, BrandTheme> = {
       { label: "AI 偏好学习", value: "自动", sub: "越用越懂你" },
       { label: "输出格式", value: "HTML+图", sub: "直接上传 Amazon" },
     ],
+    showScroller: true,
     copyright: "面向 Amazon 卖家的 AI 视觉内容工具",
   },
 

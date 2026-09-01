@@ -1,6 +1,7 @@
 import Link from "next/link";
 import GallerySection from "../components/GallerySection";
 import HeroFloatingModels from "../components/HeroFloatingModels";
+import HorizontalScroller from "../components/HorizontalScroller";
 import { getCurrentBrand } from "../lib/brand";
 
 export default function Landing() {
@@ -43,6 +44,17 @@ export default function Landing() {
         </Link>
         </div>
       </div>
+
+      {/* 横向作品轮播（wearview 风格，展示产出场景图） */}
+      {brand.showScroller !== false && (
+        <div className="py-8 sm:py-10 bg-white border-y border-border-soft">
+          <div className="max-w-5xl mx-auto px-4 mb-4 sm:mb-6">
+            <h2 className="text-lg sm:text-xl font-bold">作品展示</h2>
+            <p className="text-xs sm:text-sm text-text-muted mt-1">用 {brand.name} 生成的模特场景图（自动更新）</p>
+          </div>
+          <HorizontalScroller fallbackImages={brand.hero.images || []} />
+        </div>
+      )}
 
       {/* 三步流程 */}
       <div className="max-w-4xl mx-auto px-4 pb-12 sm:pb-16">

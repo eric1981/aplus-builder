@@ -63,9 +63,10 @@ function collectHeroImages(workDir: string): string[] {
 
 export async function GET(req: NextRequest) {
   try {
+    const all = req.nextUrl.searchParams.get("all") === "1";
     const count = Math.min(
       Math.max(parseInt(req.nextUrl.searchParams.get("count") || "6", 10) || 6, 1),
-      12,
+      all ? 60 : 12,
     );
     // 服务端指定拉取范围：默认 admin（品牌方自己的产出），可用环境变量覆盖
     const userId = process.env.HERO_IMAGE_USER || "admin";
@@ -76,39 +77,50 @@ export async function GET(req: NextRequest) {
          WHERE user_id = ? AND status = 'done' AND image_count > 0 AND work_dir IS NOT NULL
          ORDER BY RANDOM() LIMIT ?`,
       )
-      .all(userId, Math.max(count * 3, 12)) as { work_dir: string }[];
+      .all(userId, Math.max(count * 3, 24)) as { work_dir: string }[];
 
-    // 每个任务优先取 1 张（scene 模特场景图优先，无 scene 则该任务退而用 hero 首图），
-    // 池子不足 count 时补足：先补其他任务的 hero 图，再补同任务剩余 scene 图。
-    // 保证悬浮位满员的同时，尽量让 6 张来自不同任务。
     const tasks: { scenes: string[]; heros: string[] }[] = [];
     for (const r of rows) {
       const scenes = collectSceneImages(r.work_dir);
       const heros = collectHeroImages(r.work_dir);
       if (scenes.length > 0 || heros.length > 0) tasks.push({ scenes, heros });
     }
-    const pool: string[] = [];
-    // 第一轮：每任务 1 张（scene 优先）
-    for (const t of tasks) {
-      const src = t.scenes.length > 0
-        ? t.scenes[Math.floor(Math.random() * t.scenes.length)]
-        : t.heros[Math.floor(Math.random() * t.heros.length)];
-      pool.push(src);
+
+    let pool: string[] = [];
+    if (all) {
+      // 轮播模式：scene + hero 全部混合（每任务内部随机打乱顺序取 1 张为主，不足再补）
+      for (const t of tasks) {
+        const mixed = [...t.scenes, ...t.heros];
+        pool.push(mixed[Math.floor(Math.random() * mixed.length)]);
+      }
+      const rest = tasks.flatMap((t) => [...t.scenes, ...t.heros]);
+      while (pool.length < count && rest.length > 0) {
+        const i = Math.floor(Math.random() * rest.length);
+        const img = rest.splice(i, 1)[0];
+        if (!pool.includes(img)) pool.push(img);
+      }
+    } else {
+      // 悬浮模式：每任务 1 张（scene 优先），不足补 hero 再补同任务 scene
+      for (const t of tasks) {
+        const src = t.scenes.length > 0
+          ? t.scenes[Math.floor(Math.random() * t.scenes.length)]
+          : t.heros[Math.floor(Math.random() * t.heros.length)];
+        pool.push(src);
+      }
+      const heroRest = tasks.flatMap((t) => t.heros);
+      while (pool.length < count && heroRest.length > 0) {
+        const i = Math.floor(Math.random() * heroRest.length);
+        const img = heroRest.splice(i, 1)[0];
+        if (!pool.includes(img)) pool.push(img);
+      }
+      const sceneRest = tasks.flatMap((t) => t.scenes);
+      while (pool.length < count && sceneRest.length > 0) {
+        const i = Math.floor(Math.random() * sceneRest.length);
+        const img = sceneRest.splice(i, 1)[0];
+        if (!pool.includes(img)) pool.push(img);
+      }
     }
-    // 补足轮 1：其他任务的 hero 图
-    const heroRest = tasks.flatMap((t) => t.heros);
-    while (pool.length < count && heroRest.length > 0) {
-      const i = Math.floor(Math.random() * heroRest.length);
-      const img = heroRest.splice(i, 1)[0];
-      if (!pool.includes(img)) pool.push(img);
-    }
-    // 补足轮 2：同任务剩余 scene 图（此时才允许同款多张）
-    const sceneRest = tasks.flatMap((t) => t.scenes);
-    while (pool.length < count && sceneRest.length > 0) {
-      const i = Math.floor(Math.random() * sceneRest.length);
-      const img = sceneRest.splice(i, 1)[0];
-      if (!pool.includes(img)) pool.push(img);
-    }
+
     // Fisher-Yates 随机挑
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
