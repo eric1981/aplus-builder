@@ -25,17 +25,18 @@ export default function StatsSection({ data }: { data?: StatsData }) {
   if (!d.items || d.items.length === 0) return null;
 
   return (
-    <div className="relative z-10 py-12 sm:py-16">
-      <div className="text-center mb-10 sm:mb-12">
-        <p className="text-fg text-base lg:text-lg font-medium max-w-3xl mx-auto leading-relaxed px-4">
+    // 深色区块（与导航/页脚同色系），与 hero 白底形成视觉区隔
+    <div className="relative z-10 bg-[var(--amz-navy)] py-14 sm:py-20">
+      <div className="text-center mb-10 sm:mb-12 px-4">
+        <p className="text-white text-base lg:text-lg font-medium max-w-3xl mx-auto leading-relaxed">
           {d.title}
         </p>
       </div>
       <div className="flex flex-col gap-8 md:flex-row md:gap-4 lg:gap-8 justify-center items-center max-w-5xl mx-auto px-4">
         {d.items.map((it) => (
           <div key={it.label} className="text-center flex-1">
-            <div className="text-3xl lg:text-5xl font-bold text-brand mb-2">{it.value}</div>
-            <div className="text-text-muted text-sm lg:text-base font-medium">{it.label}</div>
+            <div className="text-3xl lg:text-5xl font-bold text-[var(--accent)] mb-2">{it.value}</div>
+            <div className="text-gray-400 text-sm lg:text-base font-medium">{it.label}</div>
           </div>
         ))}
       </div>
