@@ -237,8 +237,9 @@ class TaskStore {
     ensureMigrated(); // 首次查询时执行旧数据迁移
     try {
       if (userId === "admin") {
-        // admin：所有用户的真实任务（task_id 不以 legacy- 开头），JOIN 用户名。
-        // 非 admin 用户的任务：dir_name/first_image 加 "<userId>/" 前缀，
+        // admin：所有用户 + admin 自己的真实任务与旧迁移行（legacy- 前缀），
+        // 按 dir_name 去重（同目录优先真实行），带用户名。
+        // 非 admin 用户任务：dir_name/first_image 加 "<userId>/" 前缀，
         // 因为 admin 的 userBase 是 OUTPUT_BASE 根目录，必须靠前缀定位用户子目录文件。
         const rows = db
           .prepare(
@@ -247,12 +248,30 @@ class TaskStore {
                     u.name AS user_name
              FROM tasks t LEFT JOIN users u ON u.id = t.user_id
              WHERE t.status = 'done' AND t.image_count > 0
-               AND t.task_id NOT LIKE 'legacy-%'
              ORDER BY t.created_at DESC
              LIMIT 500`,
           )
           .all() as Record<string, unknown>[];
-        return rows.map((r) => {
+
+        // 去重：同一产出目录（含带 "<userId>/" 前缀的迁移行）只保留一条，
+        // 优先真实行（非 legacy）；同类型时保留先遇到的（新）
+        const seen = new Map<string, Record<string, unknown>>();
+        for (const r of rows) {
+          const dir = String(r.dir_name || "");
+          const key = dir.includes("/") ? dir.slice(dir.lastIndexOf("/") + 1) : dir;
+          if (!key) continue;
+          const existing = seen.get(key);
+          const curIsLegacy = String(r.task_id).startsWith("legacy-");
+          if (!existing) {
+            seen.set(key, r);
+          } else {
+            const oldIsLegacy = String(existing.task_id).startsWith("legacy-");
+            // 当前是真实行且已有的是 legacy 行 → 用真实行覆盖
+            if (!curIsLegacy && oldIsLegacy) seen.set(key, r);
+          }
+        }
+
+        return [...seen.values()].map((r) => {
           const uid = String(r.user_id || "admin");
           const h = toHistory(r);
           if (uid !== "admin" && h.dirName && !h.dirName.startsWith(uid + "/")) {
