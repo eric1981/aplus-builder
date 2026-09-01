@@ -12,7 +12,7 @@ export default function Landing() {
       <div className="relative">
         {/* 首屏两侧悬浮模特图（全宽定位，仅大屏显示，z-0 在文字下方） */}
         {brand.hero.images && brand.hero.images.length > 0 && (
-          <HeroFloatingModels images={brand.hero.images} />
+          <HeroFloatingModels fallbackImages={brand.hero.images} />
         )}
         <div className="relative z-10 max-w-3xl mx-auto px-4 pt-16 sm:pt-24 pb-12 sm:pb-16 text-center">
         {brand.logoImage && (

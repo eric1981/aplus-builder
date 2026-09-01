@@ -88,6 +88,12 @@ export function proxy(request: NextRequest) {
     return allowAs(request, user?.userId || "admin");
   }
 
+  // 首页悬浮模特图：随机取品牌方（HERO_IMAGE_USER，默认 admin）的公开产出，
+  // 服务端限定范围，前端不可指定 userId，免认证
+  if (pathname.startsWith("/api/hero-images")) {
+    return allowAs(request, "admin");
+  }
+
   const user = resolveUser(request);
   if (user) return allowAs(request, user.userId);
 
