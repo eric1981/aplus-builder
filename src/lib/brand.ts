@@ -80,6 +80,79 @@ export interface BrandTheme {
   copyright: string;
 }
 
+/** 共享数据成果（默认主题与图多多等客户一致，可被组件/主题覆盖） */
+const SHARED_STATS = {
+  title: "使用 AI 生成模特进行时尚摄影和品牌画册创作的电商品牌，正在取得可量化的成果",
+  items: [
+    { value: "-90%", label: "视觉制作成本降低" },
+    { value: "10x", label: "产品上线速度提升" },
+    { value: "+10%", label: "转化率提升" },
+    { value: "+12%", label: "客单价提升" },
+    { value: "+30%", label: "广告点击率提升" },
+  ],
+};
+
+/** 共享核心优势（默认主题与图多多等客户一致） */
+const SHARED_ADVANTAGES = {
+  badge: "核心优势",
+  title: "一条 AI 流水线，从产品图到货架",
+  subtitle: "四大能力覆盖选品、测款到上架的全流程，专为 Amazon 卖家打造",
+  items: [
+    {
+      badge: "全流程自动化",
+      title: "从产品图到货架",
+      desc: "上传一张白底产品图，AI 自动完成特征分析、多场景生成与 A+ 详情页排版，一条流水线直达 Amazon 货架。",
+      points: [
+        "上传白底图，自动分析产品特征",
+        "多场景模特图 + A+ 详情页一键排版",
+        "HTML + 高清图打包，直接上传上架",
+      ],
+      cta: "立即体验",
+      href: "/build",
+      image: "/gallery/product-launch.png",
+    },
+    {
+      badge: "数据驱动选品",
+      title: "市场潜力预测",
+      desc: "生成同时并行联网分析 Amazon US 市场：销量、定价、竞争与利润预估，让每一款选品都有数据支撑。",
+      points: [
+        "并行联网分析 Amazon US 市场",
+        "销量、定价、竞争、利润全维度预估",
+        "每款选品决策都有数据背书",
+      ],
+      cta: "立即体验",
+      href: "/build",
+      image: "/gallery/editorial.png",
+    },
+    {
+      badge: "越用越懂你",
+      title: "AI 偏好学习",
+      desc: "点赞与反馈自动沉淀进偏好画像，越用越懂你的审美，生成结果持续贴合品牌调性。",
+      points: [
+        "点赞 / 反馈自动沉淀偏好画像",
+        "生成结果持续贴合品牌调性",
+        "风格一致性跨任务保持",
+      ],
+      cta: "立即体验",
+      href: "/build",
+      image: "/models/european.jpg",
+    },
+    {
+      badge: "低成本快速验证",
+      title: "低成本快速测款",
+      desc: "无需摄影棚与模特，几分钟产出全套场景图，用远低于实拍的成本批量验证款式市场反应。",
+      points: [
+        "无需摄影棚、模特与摄制团队",
+        "几分钟产出全套模特场景图",
+        "低成本批量测款，快速验证市场",
+      ],
+      cta: "立即体验",
+      href: "/build",
+      image: "/models/east-asian.jpg",
+    },
+  ],
+};
+
 /** 默认主题：aplus-builder（亚马逊风格） */
 const DEFAULT_THEME: BrandTheme = {
   name: "aplus-builder",
@@ -121,16 +194,8 @@ const DEFAULT_THEME: BrandTheme = {
     { label: "输出格式", value: "HTML+图", sub: "直接上传 Amazon" },
   ],
   showScroller: true,
-  stats: {
-    title: "使用 AI 生成模特进行时尚摄影和品牌画册创作的电商品牌，正在取得可量化的成果",
-    items: [
-      { value: "-90%", label: "视觉制作成本降低" },
-      { value: "10x", label: "产品上线速度提升" },
-      { value: "+10%", label: "转化率提升" },
-      { value: "+12%", label: "客单价提升" },
-      { value: "+30%", label: "广告点击率提升" },
-    ],
-  },
+  stats: SHARED_STATS,
+  advantages: SHARED_ADVANTAGES,
   copyright: "面向 Amazon 卖家的 AI 视觉内容工具",
 };
 
@@ -181,6 +246,8 @@ const CUSTOMER_THEMES: Record<string, BrandTheme> = {
       { label: "输出格式", value: "HTML+图", sub: "直接上传 Amazon" },
     ],
     showScroller: true,
+    stats: SHARED_STATS,
+    advantages: SHARED_ADVANTAGES,
     copyright: "面向 Amazon 卖家的 AI 视觉内容工具",
   },
 
