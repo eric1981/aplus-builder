@@ -62,9 +62,19 @@ export interface BrandTheme {
   };
   /** 核心优势板块；未配置时用组件默认 */
   advantages?: {
+    badge?: string;
     title: string;
     subtitle?: string;
-    items: { title: string; desc: string; emoji?: string; image?: string; href?: string }[];
+    items: {
+      badge?: string;
+      title: string;
+      desc: string;
+      points: string[];
+      cta: string;
+      href?: string;
+      image?: string;
+      emoji?: string;
+    }[];
   };
   /** 页脚版权行 */
   copyright: string;
