@@ -30,6 +30,7 @@ interface QueueItem {
   images?: TaskImage[];
   variants?: TaskVariant[];
   error?: string;
+  /** Agent 实时日志（显示系统正在执行什么任务） */
   agentLog?: string;
   completedAt?: number;
   /** 市场潜力预测 */
@@ -447,7 +448,19 @@ export default function OutputPage() {
                 prev.map((p) => (p.id === qi.id ? { ...p, status: "running" } : p))
               );
             } else if (task.status === "running") {
-              // already running, nothing to change
+              // 运行中：更新 Agent 实时日志 + 渐进展示已产出的图片（一张出一张）
+              const imgs = (task.images || []).map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
+              setQueueItems((prev) =>
+                prev.map((p) =>
+                  p.id === qi.id
+                    ? {
+                        ...p,
+                        agentLog: typeof task.log === "string" ? task.log : p.agentLog,
+                        images: imgs.length > 0 ? imgs : p.images,
+                      }
+                    : p
+                )
+              );
             } else {
               // 任务可能在磁盘上已完成
               const entries = await getHistory();
@@ -749,14 +762,39 @@ export default function OutputPage() {
             )}
             <div className="space-y-2">
               {activeItems.map((qi) => (
-                <div key={qi.id} className={`flex items-center gap-3 p-3 rounded-xl border text-sm ${
+                <div key={qi.id} className={`p-3 sm:p-4 rounded-xl border text-sm ${
                   qi.status === "running" ? "bg-blue-50 border-blue-200" : "bg-yellow-50 border-yellow-200"
                 }`}>
-                  <span>{qi.status === "running" ? "🔵" : "⏳"}</span>
-                  <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || qi.id.slice(-8)}</span>
-                  {qi.taskId && (
-                    <button onClick={() => cancelTask(qi)} disabled={cancelingIds.has(qi.id)}
-                      className="px-2 py-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-40">取消</button>
+                  <div className="flex items-center gap-3">
+                    <span>{qi.status === "running" ? "🔵" : "⏳"}</span>
+                    <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || qi.id.slice(-8)}</span>
+                    {qi.taskId && (
+                      <button onClick={() => cancelTask(qi)} disabled={cancelingIds.has(qi.id)}
+                        className="px-2 py-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-40">取消</button>
+                    )}
+                  </div>
+
+                  {/* Agent 实时进度：显示系统正在执行什么任务 */}
+                  {qi.status === "running" && qi.agentLog && (
+                    <div className="mt-3 rounded-lg bg-white/70 border border-blue-100 p-2.5">
+                      <pre className="text-[11px] leading-relaxed text-blue-900 font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+                        {qi.agentLog.split("\n").filter((l) => l.trim()).slice(-8).join("\n")}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* 渐进展示：有一张图就展示一张 */}
+                  {qi.status === "running" && qi.images && qi.images.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[11px] text-blue-700 font-medium mb-1.5">已产出 {qi.images.length} 张图（持续生成中）</p>
+                      <div className="flex flex-wrap gap-2">
+                        {qi.images.map((img) => (
+                          <div key={img.name} className="w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden bg-white border border-blue-100 flex-shrink-0">
+                            <img src={`data:${img.mime};base64,${img.base64}`} alt={img.name} className="w-full h-full object-cover" loading="lazy" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               ))}

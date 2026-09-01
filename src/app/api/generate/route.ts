@@ -26,6 +26,8 @@ function sanitizeProductName(description: string, taskId: string): string {
 type TaskImage = { name: string; base64: string; mime: string };
 type Task = {
   status: "running" | "done" | "error" | "queued";
+  /** 任务产出目录（轮询时实时扫描已产出图片用） */
+  workDir?: string;
   html?: string;
   images?: TaskImage[];
   variants?: { name: string; html: string }[];
@@ -120,13 +122,13 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
   let actualOutputDir = outputDir;
 
   if (!existsSync(scriptPath)) {
-    tasks.set(taskId, { status: "error", error: "恢复失败：缺少 run.sh", log: "" });
+    tasks.set(taskId, { status: "error", workDir, error: "恢复失败：缺少 run.sh", log: "" });
     taskStore.markError(taskId, "恢复失败：缺少 run.sh");
     releaseSlot();
     return;
   }
 
-  tasks.set(taskId, { status: "running", log: "" });
+  tasks.set(taskId, { status: "running", workDir, log: "" });
 
   const child = spawn("/bin/bash", [scriptPath], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -142,7 +144,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     if (settled) return;
     settled = true;
     children.delete(taskId);
-    tasks.set(taskId, { status, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
+    tasks.set(taskId, { status, workDir, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
     // 数据库持久化：完成/失败都保留记录（历史 + 审计）
     if (status === "done") {
       const base = userBase(userId);
@@ -309,7 +311,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     if (code !== 0 && attempts < getSettingInt("maxAgentAttempts", 2)) {
       console.log(`[hermes-cli] Task ${taskId} 失败（exit=${code}），自动重试 ${attempts}/${getSettingInt("maxAgentAttempts", 2)}`);
       taskStore.bumpAttempts(taskId);
-      tasks.set(taskId, { status: "queued", log: logBuffer.slice(-2000) });
+      tasks.set(taskId, { status: "queued", workDir, log: logBuffer.slice(-2000) });
       queue.unshift({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) }); // 重试优先
       releaseSlot(); // 释放槽位 → tryProcessQueue 立即拉起重试
       return;
@@ -605,7 +607,7 @@ export async function POST(request: NextRequest) {
 
     // 检查并发
     if (activeCount >= curConcurrent()) {
-      tasks.set(taskId, { status: "queued", queuePosition: 1, log: "" });
+      tasks.set(taskId, { status: "queued", workDir, queuePosition: 1, log: "" });
       queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) });
       updateQueuePositions();
       return NextResponse.json({ taskId, queued: true, queuePosition: 1 });
@@ -630,6 +632,24 @@ export async function GET(request: NextRequest) {
     const keys = [...tasks.keys()];
     for (let i = 0; i < keys.length - 100; i++) tasks.delete(keys[i]);
   }
+
+  // 运行中/排队中：实时扫描磁盘产出目录，已生成的图片一张出一张（渐进展示）。
+  // 全量模式图片在 output/ 子目录，单图模式在任务根目录，两个位置都扫。
+  if ((task.status === "running" || task.status === "queued") && task.workDir) {
+    try {
+      const candidates = [join(task.workDir, "output"), task.workDir];
+      const seen = new Map<string, TaskImage>();
+      for (const dir of candidates) {
+        if (!existsSync(dir)) continue;
+        for (const img of collectImages(dir)) {
+          if (!seen.has(img.name)) seen.set(img.name, img);
+        }
+      }
+      const imgs = [...seen.values()];
+      if (imgs.length > 0) task.images = imgs;
+    } catch {}
+  }
+
   return NextResponse.json(task);
 }
 
@@ -711,7 +731,7 @@ function recoverCompletedOutput(
   const pending = taskStore.getRecoverable();
   for (const t of pending) {
     if (!existsSync(join(t.workDir, "run.sh"))) {
-      tasks.set(t.taskId, { status: "error", error: "任务数据已丢失", log: "" });
+      tasks.set(t.taskId, { status: "error", workDir: t.workDir, error: "任务数据已丢失", log: "" });
       taskStore.remove(t.taskId);
       logAudit(t.userId, "task.error", { taskId: t.taskId, error: "任务数据已丢失（恢复时）" });
       continue;
@@ -720,7 +740,7 @@ function recoverCompletedOutput(
     // 如果 output/index.html 或 index.html 已存在，说明 Agent 已完成 → 标记完成并入历史
     if (recoverCompletedOutput(t, false)) continue;
 
-    tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", log: "" });
+    tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", workDir: t.workDir, log: "" });
     // 恢复重新拉起 Agent 的审计
     logAudit(t.userId, "task.resume", { taskId: t.taskId, workDir: t.workDir });
 
@@ -733,7 +753,7 @@ function recoverCompletedOutput(
       activeCount++;
       spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId);
     } else {
-      tasks.set(t.taskId, { status: "queued", queuePosition: 1, log: "" });
+      tasks.set(t.taskId, { status: "queued", workDir: t.workDir, queuePosition: 1, log: "" });
       queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId) });
     }
   }
