@@ -42,6 +42,36 @@ type Task = {
   };
 };
 
+/**
+ * 剥离交付 HTML 中的内部标记属性（data-hermes-protected 等），
+ * 避免客户下载的产物暴露内部技术实现。只删属性，保留元素与内容。
+ */
+function stripInternalMarkers(html: string): string {
+  return html.replace(/\s+data-hermes-protected(?:="[^"]*")?/g, "");
+}
+
+/** 清洗磁盘上的交付 HTML 文件（index.html / variant_*.html），与内存交付保持一致 */
+function stripInternalMarkersOnDisk(workDir: string): void {
+  const candidates: string[] = [];
+  for (const sub of ["output", ""]) {
+    const dir = sub ? join(workDir, sub) : workDir;
+    if (!existsSync(dir)) continue;
+    candidates.push(join(dir, "index.html"));
+    try {
+      for (const f of readdirSync(dir)) {
+        if (/^variant_\d+\.html$/.test(f)) candidates.push(join(dir, f));
+      }
+    } catch {}
+  }
+  for (const p of candidates) {
+    try {
+      if (!existsSync(p)) continue;
+      const cleaned = stripInternalMarkers(readFileSync(p, "utf-8"));
+      writeFileSync(p, cleaned);
+    } catch {}
+  }
+}
+
 const tasks = new Map<string, Task>();
 // 并发/队列/重试/联网等运行参数全部来自设置中心（管理后台可改，环境变量兜底）
 const curConcurrent = () => getSettingInt("maxConcurrent", 2) || 1;
@@ -227,9 +257,16 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
         } catch {}
       }
 
+      // 交付前剥离内部标记属性（data-hermes-protected 等），避免产物暴露内部技术实现
+      protectedHtml = stripInternalMarkers(protectedHtml);
+      for (const v of variants) v.html = stripInternalMarkers(v.html);
+
       finalize("done", protectedHtml, undefined, images, signal, variants.length > 0 ? variants : undefined, finalProductName || undefined);
       console.log(`[hermes-cli] ✅ HTML ${protectedHtml.length} chars, ${images.length} images, ${variants.length} variants`);
       logAudit(userId, "task.done", { taskId, product: finalProductName || undefined, images: images.length });
+
+      // 同步清洗磁盘交付文件（/api/output 免认证直接访问时同样干净）
+      stripInternalMarkersOnDisk(actualOutputDir);
 
       // 异步生成画廊截图（不再同步阻塞事件循环）
       captureGalleryScreenshotsAsync(outputDir);

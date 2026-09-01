@@ -52,17 +52,9 @@ export default function RootLayout({
                   <li><a href="/login" className="hover:text-white">登录</a></li>
                 </ul>
               </div>
-              <div>
-                <p className="font-semibold text-white mb-3">技术栈</p>
-                <ul className="space-y-2 text-xs text-gray-300">
-                  <li>Next.js 16 · React 19 · SQLite</li>
-                  <li>Hermes Agent · 火山引擎 Ark</li>
-                  <li>DeepSeek · Tailwind CSS 4</li>
-                </ul>
-              </div>
             </div>
             <div className="border-t border-white/10 mt-8 pt-4 text-center text-xs text-gray-500">
-              Built with Hermes Agent · 火山引擎 Ark · DeepSeek
+              © {new Date().getFullYear()} aplus builder — 面向 Amazon 卖家的 AI 视觉内容工具
             </div>
           </div>
         </footer>

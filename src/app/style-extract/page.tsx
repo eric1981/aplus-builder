@@ -152,7 +152,7 @@ export default function StyleExtractPage() {
           <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
             <span className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
             <div>
-              <p className="font-medium text-blue-800 text-sm">Agent 正在分析截图并创建模板…</p>
+              <p className="font-medium text-blue-800 text-sm">AI 正在分析截图并创建模板…</p>
               <p className="text-xs text-blue-600 mt-0.5">预计 2-4 分钟</p>
             </div>
           </div>
