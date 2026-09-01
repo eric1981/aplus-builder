@@ -9,6 +9,9 @@ export async function GET(request: NextRequest) {
   try {
     const userId = request.headers.get("x-user-id") || "admin";
     const entries = taskStore.listHistory(userId).map((t) => ({
+      taskId: t.taskId,
+      userId: t.userId,
+      userName: t.userName,
       dirName: t.dirName,
       timestamp: t.createdAt,
       imageCount: t.imageCount,

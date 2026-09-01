@@ -805,7 +805,14 @@ export default function OutputPage() {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{entry.dirName}</p>
+                    <p className="text-sm font-medium truncate">
+                      {entry.userId && entry.userId !== "admin" && (
+                        <span className="mr-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-semibold align-middle">
+                          👤 {entry.userName || entry.userId}
+                        </span>
+                      )}
+                      {entry.dirName}
+                    </p>
                     <p className="text-xs text-text-muted mt-0.5">{formatTime(entry.timestamp)} · {entry.imageCount} 张图{entry.variantNames.length > 0 && ` · ${entry.variantNames.length} 变体`}</p>
                   </div>
                   <div className="flex gap-1 sm:gap-1.5">

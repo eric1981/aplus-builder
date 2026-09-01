@@ -18,6 +18,8 @@ export interface PersistedTask {
 
 export interface HistoryTask {
   taskId: string;
+  userId: string;
+  userName: string | null;
   dirName: string | null;
   productName: string | null;
   imageCount: number;
@@ -34,6 +36,8 @@ function toHistory(row: Record<string, unknown>): HistoryTask {
   } catch {}
   return {
     taskId: String(row.task_id),
+    userId: String(row.user_id || "admin"),
+    userName: row.user_name ? String(row.user_name) : null,
     dirName: row.dir_name ? String(row.dir_name) : null,
     productName: row.product_name ? String(row.product_name) : null,
     imageCount: Number(row.image_count || 0),
@@ -204,14 +208,23 @@ class TaskStore {
     }
   }
 
-  /** 按产出目录名读取预测（历史恢复用） */
+  /** 按产出目录名读取预测（历史恢复用）；支持 admin 视角的 "<userId>/<dirName>" 前缀形式 */
   getPredictionByDir(dirName: string): Record<string, unknown> | null {
     try {
-      const row = db
-        .prepare(
-          `SELECT prediction FROM tasks WHERE dir_name = ? ORDER BY created_at DESC LIMIT 1`,
-        )
-        .get(dirName) as { prediction: string | null } | undefined;
+      const find = (dir: string) =>
+        db
+          .prepare(
+            `SELECT prediction FROM tasks WHERE dir_name = ? AND prediction IS NOT NULL
+             ORDER BY created_at DESC LIMIT 1`,
+          )
+          .get(dir) as { prediction: string | null } | undefined;
+      // 1) 精确匹配（普通用户视角：dir_name 无前缀）
+      let row = find(dirName);
+      // 2) admin 视角带 "<userId>/" 前缀 → 取最后一段再匹配（预测存在真实任务行上）
+      if (!row?.prediction && dirName.includes("/")) {
+        const last = dirName.slice(dirName.lastIndexOf("/") + 1);
+        if (last) row = find(last);
+      }
       if (!row?.prediction) return null;
       return JSON.parse(row.prediction);
     } catch {
@@ -219,19 +232,51 @@ class TaskStore {
     }
   }
 
-  /** 某用户的历史（已完成且有产出的任务） */
+  /** 某用户的历史（已完成且有产出的任务）；admin 返回全部用户的真实任务（排除旧迁移行） */
   listHistory(userId: string): HistoryTask[] {
     ensureMigrated(); // 首次查询时执行旧数据迁移
-    const rows = db
-      .prepare(
-        `SELECT task_id, dir_name, product_name, image_count, first_image, variant_names, created_at, error
-         FROM tasks
-         WHERE user_id = ? AND status = 'done' AND image_count > 0
-         ORDER BY created_at DESC
-         LIMIT 500`,
-      )
-      .all(userId) as Record<string, unknown>[];
-    return rows.map(toHistory);
+    try {
+      if (userId === "admin") {
+        // admin：所有用户的真实任务（task_id 不以 legacy- 开头），JOIN 用户名。
+        // 非 admin 用户的任务：dir_name/first_image 加 "<userId>/" 前缀，
+        // 因为 admin 的 userBase 是 OUTPUT_BASE 根目录，必须靠前缀定位用户子目录文件。
+        const rows = db
+          .prepare(
+            `SELECT t.task_id, t.user_id, t.dir_name, t.product_name, t.image_count,
+                    t.first_image, t.variant_names, t.created_at, t.error,
+                    u.name AS user_name
+             FROM tasks t LEFT JOIN users u ON u.id = t.user_id
+             WHERE t.status = 'done' AND t.image_count > 0
+               AND t.task_id NOT LIKE 'legacy-%'
+             ORDER BY t.created_at DESC
+             LIMIT 500`,
+          )
+          .all() as Record<string, unknown>[];
+        return rows.map((r) => {
+          const uid = String(r.user_id || "admin");
+          const h = toHistory(r);
+          if (uid !== "admin" && h.dirName && !h.dirName.startsWith(uid + "/")) {
+            h.dirName = `${uid}/${h.dirName}`;
+          }
+          if (uid !== "admin" && h.firstImage && !h.firstImage.startsWith(uid + "/")) {
+            h.firstImage = `${uid}/${h.firstImage}`;
+          }
+          return h;
+        });
+      }
+      const rows = db
+        .prepare(
+          `SELECT task_id, dir_name, product_name, image_count, first_image, variant_names, created_at, error
+           FROM tasks
+           WHERE user_id = ? AND status = 'done' AND image_count > 0
+           ORDER BY created_at DESC
+           LIMIT 500`,
+        )
+        .all(userId) as Record<string, unknown>[];
+      return rows.map(toHistory);
+    } catch {
+      return [];
+    }
   }
 
   /** 用户最近的任务总数（后台用） */

@@ -10,6 +10,9 @@ export interface HistoryEntry {
   variantNames: string[];
   /** 第一张产出图相对 ~/Downloads/aplus-builder 的路径（用于列表缩略图），无图时为 null */
   firstImage?: string | null;
+  /** 任务归属用户（admin 视角查看全量产出时用于区分） */
+  userId?: string;
+  userName?: string | null;
 }
 
 export interface LoadedOutput {
