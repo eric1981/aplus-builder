@@ -3,6 +3,7 @@ import GallerySection from "../components/GallerySection";
 import HeroFloatingModels from "../components/HeroFloatingModels";
 import HorizontalScroller from "../components/HorizontalScroller";
 import StatsSection from "../components/StatsSection";
+import AdvantagesSection from "../components/AdvantagesSection";
 import { getCurrentBrand } from "../lib/brand";
 
 export default function Landing() {
@@ -59,6 +60,9 @@ export default function Landing() {
           <HorizontalScroller fallbackImages={brand.hero.images || []} />
         </div>
       )}
+
+      {/* 核心优势（wearview features 风格，主题可覆盖） */}
+      <AdvantagesSection data={brand.advantages} />
 
       {/* 三步流程 */}
       <div className="max-w-4xl mx-auto px-4 pt-16 sm:pt-24 pb-12 sm:pb-16">

@@ -60,6 +60,12 @@ export interface BrandTheme {
     title: string;
     items: { value: string; label: string }[];
   };
+  /** 核心优势板块；未配置时用组件默认 */
+  advantages?: {
+    title: string;
+    subtitle?: string;
+    items: { title: string; desc: string; emoji?: string; image?: string; href?: string }[];
+  };
   /** 页脚版权行 */
   copyright: string;
 }
