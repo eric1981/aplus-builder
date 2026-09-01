@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { getHistory } from "../../lib/history";
 import { apiFetch } from "../../lib/apiFetch";
 import { STYLE_OPTIONS, OD_STYLES, MODEL_OPTIONS, type BuiltinStyle, type ModelPref } from "../../lib/preference-constants";
@@ -123,6 +124,7 @@ function saveState(state: Partial<SavedState>) {
 const DEFAULT_PREFS: Preferences = { style: "auto", odStyle: "", model: "auto" };
 
 export default function BuildPage() {
+  const router = useRouter();
   // -- 表单状态 --
   const [formImage, setFormImage] = useState<string | null>(null);
   const [formImageFile, setFormImageFile] = useState<File | null>(null);
@@ -294,13 +296,18 @@ export default function BuildPage() {
       useCredit();
       setCredits(loadCredits());
 
+      const updatedItem: QueueItem = {
+        ...item,
+        taskId: data.taskId,
+        status: data.queued ? "queued" : "running",
+      };
       setQueueItems((prev) =>
-        prev.map((qi) =>
-          qi.id === item.id
-            ? { ...qi, taskId: data.taskId, status: data.queued ? "queued" : "running" }
-            : qi
-        )
+        prev.map((qi) => (qi.id === item.id ? updatedItem : qi))
       );
+      // 立即持久化（避免跳转后 output 页水合时 localStorage 尚未更新的竞态）
+      saveState({ queueItems: [...queueItems, updatedItem], preferences: prefs });
+      // 跳转到产出中心查看进度
+      router.push("/output");
     } catch (e) {
       setQueueItems((prev) =>
         prev.map((qi) =>
