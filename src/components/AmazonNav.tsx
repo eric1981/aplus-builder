@@ -21,17 +21,17 @@ export default function AmazonNav() {
     <header className="amz-navbar">
       <div className="max-w-[1500px] mx-auto px-4 h-12 sm:h-14 flex items-center gap-4 sm:gap-8">
         <Link href="/" className="text-base sm:text-lg font-bold whitespace-nowrap shrink-0">
-          <span style={{ color: brand.accent }}>{brand.logoPart1}</span>
+          <span style={{ color: "var(--accent)" }}>{brand.logoPart1}</span>
           <span className="text-white">{brand.logoPart2}</span>
         </Link>
 
         <nav className="flex items-center gap-4 sm:gap-6 text-xs sm:text-sm flex-1 overflow-x-auto">
-          <Link href="/build" className="whitespace-nowrap hover:text-[#ff9900]">生成</Link>
-          <Link href="/output" className="whitespace-nowrap hover:text-[#ff9900]">产出</Link>
-          <Link href="/customers" className="whitespace-nowrap hover:text-[#ff9900]">客户</Link>
-          <Link href="/style-extract" className="whitespace-nowrap hover:text-[#ff9900]">风格复刻</Link>
+          <Link href="/build" className="whitespace-nowrap hover:text-[var(--accent)]">生成</Link>
+          <Link href="/output" className="whitespace-nowrap hover:text-[var(--accent)]">产出</Link>
+          <Link href="/customers" className="whitespace-nowrap hover:text-[var(--accent)]">客户</Link>
+          <Link href="/style-extract" className="whitespace-nowrap hover:text-[var(--accent)]">风格复刻</Link>
           {user?.role === "admin" && (
-            <Link href="/admin" className="whitespace-nowrap hover:text-[#ff9900]">管理后台</Link>
+            <Link href="/admin" className="whitespace-nowrap hover:text-[var(--accent)]">管理后台</Link>
           )}
         </nav>
 
@@ -39,10 +39,10 @@ export default function AmazonNav() {
           {user ? (
             <>
               <span className="text-gray-300 hidden md:inline">你好，{user.name}</span>
-              <button onClick={handleLogout} className="hover:text-[#ff9900] cursor-pointer">退出</button>
+              <button onClick={handleLogout} className="hover:text-[var(--accent)] cursor-pointer">退出</button>
             </>
           ) : (
-            <Link href="/login" className="hover:text-[#ff9900]">登录</Link>
+            <Link href="/login" className="hover:text-[var(--accent)]">登录</Link>
           )}
         </div>
       </div>

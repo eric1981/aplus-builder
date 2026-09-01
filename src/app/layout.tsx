@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AmazonNav from "../components/AmazonNav";
-import { getCurrentBrand } from "../lib/brand";
+import { getCurrentBrand, brandCssVars } from "../lib/brand";
 
 export const metadata: Metadata = {
   title: "电商详情页生成器",
@@ -24,7 +24,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen flex flex-col">
+      <body className="min-h-screen flex flex-col" style={brandCssVars(brand)}>
         <AmazonNav />
         <main className="flex-1">{children}</main>
         {/* 品牌风格页脚 */}
@@ -33,7 +33,7 @@ export default function RootLayout({
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-sm">
               <div>
                 <p className="font-semibold text-white mb-3">
-                  <span style={{ color: brand.accent }}>{brand.logoPart1}</span>
+                  <span style={{ color: "var(--accent)" }}>{brand.logoPart1}</span>
                   {brand.logoPart2}
                 </p>
                 <p className="text-xs text-gray-400 leading-relaxed">
@@ -43,17 +43,17 @@ export default function RootLayout({
               <div>
                 <p className="font-semibold text-white mb-3">开始使用</p>
                 <ul className="space-y-2 text-xs text-gray-300">
-                  <li><a href="/build" className="hover:text-white">生成详情页</a></li>
-                  <li><a href="/output" className="hover:text-white">查看产出</a></li>
-                  <li><a href="/style-extract" className="hover:text-white">风格复刻</a></li>
+                  <li><a href="/build" className="hover:text-[var(--accent-light)]">生成详情页</a></li>
+                  <li><a href="/output" className="hover:text-[var(--accent-light)]">查看产出</a></li>
+                  <li><a href="/style-extract" className="hover:text-[var(--accent-light)]">风格复刻</a></li>
                 </ul>
               </div>
               <div>
                 <p className="font-semibold text-white mb-3">客户与后台</p>
                 <ul className="space-y-2 text-xs text-gray-300">
-                  <li><a href="/customers" className="hover:text-white">客户档案</a></li>
-                  <li><a href="/admin" className="hover:text-white">管理后台</a></li>
-                  <li><a href="/login" className="hover:text-white">登录</a></li>
+                  <li><a href="/customers" className="hover:text-[var(--accent-light)]">客户档案</a></li>
+                  <li><a href="/admin" className="hover:text-[var(--accent-light)]">管理后台</a></li>
+                  <li><a href="/login" className="hover:text-[var(--accent-light)]">登录</a></li>
                 </ul>
               </div>
             </div>

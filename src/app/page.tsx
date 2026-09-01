@@ -9,6 +9,13 @@ export default function Landing() {
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       {/* Hero */}
       <div className="max-w-3xl mx-auto px-4 pt-16 sm:pt-24 pb-12 sm:pb-16 text-center">
+        {brand.logoImage && (
+          <img
+            src={brand.logoImage}
+            alt={brand.name}
+            className="mx-auto mb-6 max-h-20 sm:max-h-24 w-auto object-contain"
+          />
+        )}
         <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-full text-[10px] sm:text-xs text-text-muted mb-6 sm:mb-8">
           <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
           {brand.hero.badge}
