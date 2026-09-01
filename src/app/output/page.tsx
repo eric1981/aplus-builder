@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { getHistory, loadOutput, rewriteImagePaths, outputImageUrl, type HistoryEntry, type LoadedOutput } from "../../lib/history";
+import { getHistory, loadOutput, outputImageUrl, type HistoryEntry, type LoadedOutput } from "../../lib/history";
 import { apiFetch } from "../../lib/apiFetch";
 
 const STORAGE_KEY = "aplus-builder-state";
@@ -129,6 +129,26 @@ function addSignal(profile: PreferenceProfile, signal: string): PreferenceProfil
 }
 
 // ===== 工具 =====
+
+/**
+ * 把 HTML 中的图片引用（./output/xxx.jpg、output/xxx.jpg、/api/output/.../xxx.jpg 等）
+ * 替换成 base64 data URL，使预览 iframe 完全自包含 —— 不依赖会话 cookie、
+ * 不依赖磁盘路径，避免 sandbox iframe 内图片 404 / 加载失败。
+ */
+function embedPreviewImages(html: string, images: TaskImage[]): string {
+  let out = html;
+  for (const img of images) {
+    if (!img?.name || !img?.base64) continue;
+    const dataUrl = `data:${img.mime || "image/jpeg"};base64,${img.base64}`;
+    const escaped = img.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // 匹配任意前缀（./output/、output/、/api/output/.../output/ 等）下的同名图片引用
+    out = out.replace(
+      new RegExp(`(["'])(?:[^"']*\\/)?${escaped}(["'])`, "g"),
+      `$1${dataUrl}$2`,
+    );
+  }
+  return out;
+}
 
 /** 市场潜力预测卡片 */
 function PredictionCard({ prediction }: { prediction: { status: string; data?: PredictionData | null; error?: string } | null | undefined }) {
@@ -362,10 +382,11 @@ export default function OutputPage() {
       if (!match) continue;
       loadOutput(match.dirName).then((data) => {
         if (!data?.html) return;
+        const imgs = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
         setQueueItems((prev) =>
           prev.map((p) =>
             p.id === item.id
-              ? { ...p, status: "done", html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })) }
+              ? { ...p, status: "done", html: embedPreviewImages(data.html, imgs), images: imgs, variants: data.variants?.map((v: any) => ({ name: v.name, html: embedPreviewImages(v.html, imgs) })) }
               : p
           )
         );
@@ -438,10 +459,11 @@ export default function OutputPage() {
                 setHistoryEntries(entries);
                 const data = await loadOutput(match.dirName);
                 if (data?.html) {
+                  const imgs = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
                   setQueueItems((prev) =>
                     prev.map((p) =>
                       p.id === qi.id
-                        ? { ...p, status: "done", html: rewriteImagePaths(data.html, match.dirName), images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })), variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, match.dirName) })), completedAt: Date.now() }
+                        ? { ...p, status: "done", html: embedPreviewImages(data.html, imgs), images: imgs, variants: data.variants?.map((v: any) => ({ name: v.name, html: embedPreviewImages(v.html, imgs) })), completedAt: Date.now() }
                         : p
                     )
                   );
@@ -543,10 +565,12 @@ export default function OutputPage() {
         setPreviewError(`预览加载失败：未找到产出数据（${entry.dirName}）`);
         return;
       }
+      const images = data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
       setPreview({
-        html: rewriteImagePaths(data.html, entry.dirName),
-        images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })),
-        variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, entry.dirName) })) || [],
+        // 图片直接内嵌 base64，iframe 不再依赖 /api/output 网络请求（沙箱内可能丢 cookie 导致 404）
+        html: embedPreviewImages(data.html, images),
+        images,
+        variants: data.variants?.map((v: any) => ({ name: v.name, html: embedPreviewImages(v.html, images) })) || [],
         title: entry.dirName,
         prediction: data.prediction ? { status: "done", data: data.prediction as unknown as PredictionData } : null,
       });
