@@ -44,6 +44,8 @@ export interface BrandTheme {
     subtitle: string;
     pipeline: string;
     cta: string;
+    /** 首屏两侧悬浮模特图（6 张竖版 9:16 图片，public 路径）；空数组则不显示 */
+    images?: string[];
   };
   /** 首页三步流程 */
   steps: { step: string; title: string; desc: string }[];
@@ -72,6 +74,15 @@ const DEFAULT_THEME: BrandTheme = {
     subtitle: "上传一张白底产品图，AI 自动完成全流程",
     pipeline: "产品特征分析 → Amazon大卖视觉分析 → 多场景图生成 → A+ 详情页排版 → 一键下载交付",
     cta: "✨ 开始使用",
+    // 首屏两侧悬浮图：3 张模特图 + 3 张 gallery 风格图（9:16 竖版）
+    images: [
+      "/models/east-asian.jpg",
+      "/gallery/editorial.png",
+      "/models/middle-eastern.jpg",
+      "/gallery/swiss.png",
+      "/models/european.jpg",
+      "/gallery/product-launch.png",
+    ],
   },
   steps: [
     { step: "①", title: "上传产品图", desc: "拖拽或点击上传一张白底产品照，支持 JPG/PNG/WebP。可选填产品描述帮助 AI 更准确。" },
@@ -113,6 +124,14 @@ const CUSTOMER_THEMES: Record<string, BrandTheme> = {
       subtitle: "上传一张白底产品图，AI 自动完成全流程",
       pipeline: "产品特征分析 → Amazon大卖视觉分析 → 多场景图生成 → A+ 详情页排版 → 一键下载交付",
       cta: "✨ 开始使用",
+      images: [
+        "/models/east-asian.jpg",
+        "/gallery/editorial.png",
+        "/models/middle-eastern.jpg",
+        "/gallery/swiss.png",
+        "/models/european.jpg",
+        "/gallery/product-launch.png",
+      ],
     },
     steps: [
       { step: "①", title: "上传产品图", desc: "拖拽或点击上传一张白底产品照，支持 JPG/PNG/WebP。可选填产品描述帮助 AI 更准确。" },

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import GallerySection from "../components/GallerySection";
+import HeroFloatingModels from "../components/HeroFloatingModels";
 import { getCurrentBrand } from "../lib/brand";
 
 export default function Landing() {
@@ -8,7 +9,12 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       {/* Hero */}
-      <div className="max-w-3xl mx-auto px-4 pt-16 sm:pt-24 pb-12 sm:pb-16 text-center">
+      <div className="relative">
+        {/* 首屏两侧悬浮模特图（全宽定位，仅大屏显示，z-0 在文字下方） */}
+        {brand.hero.images && brand.hero.images.length > 0 && (
+          <HeroFloatingModels images={brand.hero.images} />
+        )}
+        <div className="relative z-10 max-w-3xl mx-auto px-4 pt-16 sm:pt-24 pb-12 sm:pb-16 text-center">
         {brand.logoImage && (
           <img
             src={brand.logoImage}
@@ -35,6 +41,7 @@ export default function Landing() {
         >
           {brand.hero.cta}
         </Link>
+        </div>
       </div>
 
       {/* 三步流程 */}

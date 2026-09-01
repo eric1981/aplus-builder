@@ -156,5 +156,27 @@ input:focus, textarea:focus, select:focus {
   color: #ddd;
 }
 
+/* ─── 首屏悬浮模特图（wearview 风格）───────────────
+ * 6 张竖版图绝对定位在 hero 两侧，上下缓慢浮动 + 阴影呼吸，
+ * 用负 animation-delay 让各图错峰（不同相位），避免齐上齐下。 */
+.animate-float-collage {
+  animation: float-collage 6s ease-in-out infinite;
+}
+
+@keyframes float-collage {
+  0% {
+    transform: translateY(0);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.2);
+  }
+  50% {
+    transform: translateY(-12px);
+    box-shadow: 0 35px 60px -15px rgba(0, 0, 0, 0.25);
+  }
+  100% {
+    transform: translateY(0);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.2);
+  }
+}
+
 /* 价格红 */
 .amz-price { color: var(--amz-red); font-weight: 600; }
