@@ -295,6 +295,8 @@ export default function OutputPage() {
     html: string; images: TaskImage[]; variants: TaskVariant[]; title: string;
     prediction?: { status: string; data?: PredictionData | null; error?: string } | null;
   } | null>(null);
+  // 预览加载失败提示（历史预览/查看任务失败时展示，避免"点了没反应"）
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const queueItemsRef = useRef(queueItems);
@@ -534,20 +536,29 @@ export default function OutputPage() {
 
   // -- 历史恢复：不加入队列，直接预览 --
   const restoreHistory = async (entry: HistoryEntry) => {
-    const data = await loadOutput(entry.dirName);
-    if (!data) return;
-    setPreview({
-      html: rewriteImagePaths(data.html, entry.dirName),
-      images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })),
-      variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, entry.dirName) })) || [],
-      title: entry.dirName,
-      prediction: data.prediction ? { status: "done", data: data.prediction as unknown as PredictionData } : null,
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setPreviewError(null);
+    try {
+      const data = await loadOutput(entry.dirName);
+      if (!data) {
+        setPreviewError(`预览加载失败：未找到产出数据（${entry.dirName}）`);
+        return;
+      }
+      setPreview({
+        html: rewriteImagePaths(data.html, entry.dirName),
+        images: data.images.map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime })),
+        variants: data.variants?.map((v: any) => ({ name: v.name, html: rewriteImagePaths(v.html, entry.dirName) })) || [],
+        title: entry.dirName,
+        prediction: data.prediction ? { status: "done", data: data.prediction as unknown as PredictionData } : null,
+      });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e: any) {
+      setPreviewError(`预览加载失败：${e?.message || "未知错误"}`);
+    }
   };
 
   // -- 查看已完成的任务 --
   const viewDoneItem = (item: QueueItem) => {
+    setPreviewError(null);
     setPreview({
       html: item.html || "",
       images: item.images || [],
@@ -558,7 +569,7 @@ export default function OutputPage() {
   };
 
   // -- 关闭预览 --
-  const closePreview = () => setPreview(null);
+  const closePreview = () => { setPreview(null); setPreviewError(null); };
 
   // -- 响应式 HTML --
   const responsiveHtml = useMemo(() => {
@@ -602,6 +613,19 @@ export default function OutputPage() {
       </header>
 
       <div className="max-w-2xl lg:max-w-5xl mx-auto px-3 sm:px-4 py-6 sm:py-8 space-y-6 sm:space-y-8">
+        {/* ===== 预览加载失败提示 ===== */}
+        {previewError && (
+          <div className="p-3 sm:p-4 border border-red-200 bg-red-50 rounded-xl text-sm text-red-700 flex items-start gap-2">
+            <span className="shrink-0">⚠️</span>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium">预览加载失败</p>
+              <p className="text-xs text-red-600 mt-0.5 break-all">{previewError}</p>
+              <p className="text-xs text-red-500 mt-1">请确认产出文件完整（index.html 与图片），或刷新后重试。</p>
+            </div>
+            <button onClick={() => setPreviewError(null)} className="shrink-0 text-red-400 hover:text-red-600">✕</button>
+          </div>
+        )}
+
         {/* ===== 预览区 ===== */}
         {preview && (
           <div className="space-y-4">

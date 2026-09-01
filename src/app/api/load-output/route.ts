@@ -32,43 +32,64 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
 
   try {
-    // 支持 output/ 子目录和根目录两种结构
-    const scanDir = existsSync(join(dirPath, "output")) ? join(dirPath, "output") : dirPath;
+    // 兼容三种结构：
+    // 1) 标准：output/index.html + output/图片 + output/variant_N.html
+    // 2) 旧结构：根目录 index.html + 图片 + variant_N.html
+    // 3) 混合（手动补全产物）：index.html/variant 在根目录，图片在 output/ 子目录
+    const outputDir = join(dirPath, "output");
+    const hasOutput = existsSync(outputDir);
 
-    // Load HTML
-    const htmlPath = join(scanDir, "index.html");
-    const html = existsSync(htmlPath)
-      ? readFileSync(htmlPath, "utf-8")
-      : "";
+    // Load HTML：优先 output/index.html，其次根目录 index.html
+    const htmlPath = [join(outputDir, "index.html"), join(dirPath, "index.html")]
+      .find((p) => existsSync(p));
+    const html = htmlPath ? readFileSync(htmlPath, "utf-8") : "";
 
-    // Load images as base64
-    const files = readdirSync(scanDir);
-    const imageFiles = files.filter((f) =>
-      /\.(jpg|jpeg|png|webp)$/i.test(f),
-    );
-    const images = imageFiles.map((name) => {
-      const buf = readFileSync(join(dirPath, name));
-      const ext = name.split(".").pop()?.toLowerCase() || "jpeg";
-      const mime =
-        ext === "png"
-          ? "image/png"
-          : ext === "webp"
-            ? "image/webp"
-            : "image/jpeg";
-      return { name, base64: buf.toString("base64"), mime };
-    });
+    // 扫描范围：output/ 与根目录都收集（图片/变体可能分散在两处）
+    const scanDirs = hasOutput ? [outputDir, dirPath] : [dirPath];
 
-    // Load variants
-    const variantFiles = files
-      .filter((f) => /^variant_\d+\.html$/.test(f))
-      .sort();
-    const variants = variantFiles.map((f) => ({
-      name: f
-        .replace(".html", "")
-        .replace("_", " ")
-        .replace(/\b\w/g, (c) => c.toUpperCase()),
-      html: readFileSync(join(dirPath, f), "utf-8"),
-    }));
+    // Load images as base64（按文件名去重）
+    const seenImages = new Set<string>();
+    const images: { name: string; base64: string; mime: string }[] = [];
+    for (const d of scanDirs) {
+      let files: string[] = [];
+      try { files = readdirSync(d); } catch { continue; }
+      const imageFiles = files.filter((f) =>
+        /\.(jpg|jpeg|png|webp)$/i.test(f) && !seenImages.has(f),
+      );
+      for (const name of imageFiles) {
+        seenImages.add(name);
+        const buf = readFileSync(join(d, name));
+        const ext = name.split(".").pop()?.toLowerCase() || "jpeg";
+        const mime =
+          ext === "png"
+            ? "image/png"
+            : ext === "webp"
+              ? "image/webp"
+              : "image/jpeg";
+        images.push({ name, base64: buf.toString("base64"), mime });
+      }
+    }
+
+    // Load variants（按文件名去重，数字顺序排序）
+    const seenVariants = new Set<string>();
+    const variants: { name: string; html: string }[] = [];
+    for (const d of scanDirs) {
+      let files: string[] = [];
+      try { files = readdirSync(d); } catch { continue; }
+      const variantFiles = files
+        .filter((f) => /^variant_\d+\.html$/.test(f) && !seenVariants.has(f))
+        .sort();
+      for (const f of variantFiles) {
+        seenVariants.add(f);
+        variants.push({
+          name: f
+            .replace(".html", "")
+            .replace("_", " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase()),
+          html: readFileSync(join(d, f), "utf-8"),
+        });
+      }
+    }
 
     return NextResponse.json({
       html,
