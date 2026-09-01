@@ -138,8 +138,8 @@ export async function GET(req: NextRequest) {
     // 并允许浏览器/前端缓存，避免每次预览都全量重传。
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      // 产出目录名唯一且内容不变，可安全缓存 10 分钟
-      "Cache-Control": "private, max-age=600",
+      // 不缓存：前端自带内存缓存（同会话秒开）+ 请求带 _t 时间戳防浏览器缓存旧响应
+      "Cache-Control": "no-store",
       "Vary": "Cookie",
     };
     if (json.length > 1024) {

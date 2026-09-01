@@ -36,17 +36,21 @@ export async function getHistory(): Promise<HistoryEntry[]> {
 // 预览输出缓存：同一目录只下载一次（产出内容不变），避免远程/隧道访问下反复全量拉取 base64 图片
 const outputCache = new Map<string, LoadedOutput>();
 const OUTPUT_CACHE_MAX = 20;
+// 缓存键版本：后端响应结构变化（如新增 prediction/缩略图）时 +1，强制刷新内存缓存
+const OUTPUT_CACHE_VERSION = 2;
 
 export async function loadOutput(dirName: string): Promise<LoadedOutput | null> {
-  const cached = outputCache.get(dirName);
+  const cacheKey = `${OUTPUT_CACHE_VERSION}:${dirName}`;
+  const cached = outputCache.get(cacheKey);
   if (cached) return cached;
   try {
+    // _t 时间戳：绕过浏览器 HTTP 缓存（服务端已设 private max-age），确保拿到最新数据
     const res = await apiFetch(
-      `/api/load-output?dir=${encodeURIComponent(dirName)}`,
+      `/api/load-output?dir=${encodeURIComponent(dirName)}&_t=${Date.now()}`,
     );
     if (!res.ok) return null;
     const data = await res.json();
-    outputCache.set(dirName, data);
+    outputCache.set(cacheKey, data);
     // 简单 LRU：超过上限时删最早的
     if (outputCache.size > OUTPUT_CACHE_MAX) {
       const oldest = outputCache.keys().next().value;
