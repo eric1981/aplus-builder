@@ -119,6 +119,27 @@ class TaskStore {
     }
   }
 
+  /** 失败但已有产出目录的任务（Agent 退出码非 0 但产物齐全，供恢复补记 done） */
+  getErroredForRecovery(): { taskId: string; userId: string; workDir: string }[] {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT task_id, user_id, work_dir FROM tasks WHERE status = 'error' AND work_dir IS NOT NULL`,
+        )
+        .all() as Record<string, unknown>[];
+      return rows
+        .filter((r) => r.work_dir)
+        .map((r) => ({
+          taskId: String(r.task_id),
+          userId: String(r.user_id || "admin"),
+          workDir: String(r.work_dir),
+        }));
+    } catch {
+      // 构建期多 worker 并发或库未就绪时返回空
+      return [];
+    }
+  }
+
   /** 任务完成：更新状态与产出元数据（历史记录来源） */
   markDone(
     taskId: string,

@@ -630,7 +630,47 @@ export async function DELETE(request: NextRequest) {
 
 // ===== 启动时恢复中断任务 =====
 
+/** 产物完整则补记完成（供运行中/排队中恢复与失败补记共用），返回是否已补记 */
+function recoverCompletedOutput(
+  t: { taskId: string; userId: string; workDir: string },
+  fromError: boolean,
+): boolean {
+  if (!(existsSync(join(t.workDir, "output", "index.html"))
+        || existsSync(join(t.workDir, "index.html")))) {
+    return false;
+  }
+  const scanPath = existsSync(join(t.workDir, "output"))
+    ? join(t.workDir, "output")
+    : t.workDir;
+  let imageCount = 0;
+  let firstImage: string | null = null;
+  try {
+    const files = readdirSync(scanPath).filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f)).sort();
+    imageCount = files.length;
+    if (files.length > 0) {
+      firstImage = relative(userBase(t.userId), join(scanPath, files[0]));
+    }
+  } catch {}
+  taskStore.markDone(t.taskId, {
+    dirName: relative(userBase(t.userId), t.workDir),
+    imageCount,
+    firstImage,
+    variantNames: [],
+  });
+  logAudit(t.userId, "task.done", {
+    taskId: t.taskId,
+    recovered: true,
+    fromError: fromError || undefined,
+    images: imageCount,
+  });
+  console.log(
+    `[hermes-cli] ✅ ${fromError ? "失败但产物完整，补记完成" : "恢复时发现已完成"}：${t.workDir}`,
+  );
+  return true;
+}
+
 (function recoverTasks() {
+  // 1) 运行中/排队中任务：产物完整则补记 done，否则重新拉起
   const pending = taskStore.getRecoverable();
   for (const t of pending) {
     if (!existsSync(join(t.workDir, "run.sh"))) {
@@ -641,30 +681,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // 如果 output/index.html 或 index.html 已存在，说明 Agent 已完成 → 标记完成并入历史
-    if (existsSync(join(t.workDir, "output", "index.html"))
-        || existsSync(join(t.workDir, "index.html"))) {
-      const scanPath = existsSync(join(t.workDir, "output"))
-        ? join(t.workDir, "output")
-        : t.workDir;
-      let imageCount = 0;
-      let firstImage: string | null = null;
-      try {
-        const files = readdirSync(scanPath).filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f)).sort();
-        imageCount = files.length;
-        if (files.length > 0) {
-          firstImage = relative(userBase(t.userId), join(scanPath, files[0]));
-        }
-      } catch {}
-      taskStore.markDone(t.taskId, {
-        dirName: relative(userBase(t.userId), t.workDir),
-        imageCount,
-        firstImage,
-        variantNames: [],
-      });
-      logAudit(t.userId, "task.done", { taskId: t.taskId, recovered: true, images: imageCount });
-      console.log(`[hermes-cli] ✅ 恢复时发现已完成：${t.workDir}`);
-      continue;
-    }
+    if (recoverCompletedOutput(t, false)) continue;
 
     tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", log: "" });
     // 恢复重新拉起 Agent 的审计
@@ -683,9 +700,20 @@ export async function DELETE(request: NextRequest) {
       queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId) });
     }
   }
+
+  // 2) 失败（Agent 退出码非 0）但产物完整的任务：补记 done，不重新拉起
+  const errored = taskStore.getErroredForRecovery();
+  let recoveredErrored = 0;
+  for (const t of errored) {
+    if (recoverCompletedOutput(t, true)) recoveredErrored++;
+  }
+
   updateQueuePositions();
   if (pending.length > 0) {
     console.log(`[hermes-cli] 🔄 恢复了 ${pending.length} 个中断任务`);
+  }
+  if (recoveredErrored > 0) {
+    console.log(`[hermes-cli] 🔄 补记 ${recoveredErrored} 个失败但产物完整的任务为完成`);
   }
 })();
 
