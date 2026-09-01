@@ -2,6 +2,7 @@ import Link from "next/link";
 import GallerySection from "../components/GallerySection";
 import HeroFloatingModels from "../components/HeroFloatingModels";
 import HorizontalScroller from "../components/HorizontalScroller";
+import StatsSection from "../components/StatsSection";
 import { getCurrentBrand } from "../lib/brand";
 
 export default function Landing() {
@@ -44,6 +45,9 @@ export default function Landing() {
         </Link>
         </div>
       </div>
+
+      {/* 数据成果展示（hero 与轮播之间，文字可主题覆盖） */}
+      <StatsSection data={brand.stats} />
 
       {/* 横向作品轮播（wearview 风格，展示产出场景图） */}
       {brand.showScroller !== false && (

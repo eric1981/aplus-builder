@@ -55,6 +55,11 @@ export interface BrandTheme {
   showScroller?: boolean;
   /** 轮播 fallback 图（动态拉取失败时用） */
   scrollerImages?: string[];
+  /** 数据成果展示（hero 与轮播之间）；未配置时用组件默认 */
+  stats?: {
+    title: string;
+    items: { value: string; label: string }[];
+  };
   /** 页脚版权行 */
   copyright: string;
 }
@@ -100,6 +105,16 @@ const DEFAULT_THEME: BrandTheme = {
     { label: "输出格式", value: "HTML+图", sub: "直接上传 Amazon" },
   ],
   showScroller: true,
+  stats: {
+    title: "使用 AI 生成模特进行时尚摄影和品牌画册创作的电商品牌，正在取得可量化的成果",
+    items: [
+      { value: "-90%", label: "视觉制作成本降低" },
+      { value: "10x", label: "产品上线速度提升" },
+      { value: "+10%", label: "转化率提升" },
+      { value: "+12%", label: "客单价提升" },
+      { value: "+30%", label: "广告点击率提升" },
+    ],
+  },
   copyright: "面向 Amazon 卖家的 AI 视觉内容工具",
 };
 
