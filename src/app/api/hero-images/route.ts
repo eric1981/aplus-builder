@@ -58,10 +58,24 @@ export async function GET(req: NextRequest) {
       )
       .all(userId, Math.max(count * 3, 12)) as { work_dir: string }[];
 
-    // 汇总所有候选任务的 scene 图，再随机挑 count 张
+    // 每个任务优先取 1 张 scene 图（避免同一件衣服的多个场景重复展示），
+    // 池子不足 count 时用同一任务的其他 scene 图补足，保证悬浮位满员
     const pool: string[] = [];
+    const perTask: string[][] = [];
     for (const r of rows) {
-      pool.push(...collectSceneImages(r.work_dir));
+      const scenes = collectSceneImages(r.work_dir);
+      if (scenes.length > 0) perTask.push(scenes);
+    }
+    // 第一轮：每任务随机 1 张
+    for (const scenes of perTask) {
+      pool.push(scenes[Math.floor(Math.random() * scenes.length)]);
+    }
+    // 补足轮：池子不足 count 时，从剩余 scene 图里随机补（此时才允许同款多张）
+    const rest = perTask.flatMap((s) => s);
+    while (pool.length < count && rest.length > 0) {
+      const i = Math.floor(Math.random() * rest.length);
+      const img = rest.splice(i, 1)[0];
+      if (!pool.includes(img)) pool.push(img);
     }
     // Fisher-Yates 随机挑
     for (let i = pool.length - 1; i > 0; i--) {
