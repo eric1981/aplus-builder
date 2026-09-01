@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AmazonNav from "../components/AmazonNav";
+import { getCurrentBrand } from "../lib/brand";
 
 export const metadata: Metadata = {
   title: "电商详情页生成器",
@@ -12,6 +13,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const brand = getCurrentBrand();
+
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
@@ -24,16 +27,17 @@ export default function RootLayout({
       <body className="min-h-screen flex flex-col">
         <AmazonNav />
         <main className="flex-1">{children}</main>
-        {/* 亚马逊风格页脚 */}
+        {/* 品牌风格页脚 */}
         <footer className="amz-footer mt-12">
           <div className="max-w-[1500px] mx-auto px-4 py-10">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-sm">
               <div>
                 <p className="font-semibold text-white mb-3">
-                  <span className="text-[#ff9900]">aplus</span>-builder
+                  <span style={{ color: brand.accent }}>{brand.logoPart1}</span>
+                  {brand.logoPart2}
                 </p>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  Amazon A+ 视觉工业流水线：产品图 → AI 生图 → 详情页排版 → 交付
+                  {brand.tagline}
                 </p>
               </div>
               <div>
@@ -54,7 +58,7 @@ export default function RootLayout({
               </div>
             </div>
             <div className="border-t border-white/10 mt-8 pt-4 text-center text-xs text-gray-500">
-              © {new Date().getFullYear()} aplus builder — 面向 Amazon 卖家的 AI 视觉内容工具
+              © {new Date().getFullYear()} {brand.name} — {brand.copyright}
             </div>
           </div>
         </footer>

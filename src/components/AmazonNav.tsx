@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth, logout } from "../lib/auth-client";
+import { getClientBrand } from "../lib/brand";
 
-/** 亚马逊风格顶部导航（深藏青 #131921） */
+/** 品牌风格顶部导航（默认深藏青 #131921，可按客户主题定制） */
 export default function AmazonNav() {
   const { user } = useAuth();
   const router = useRouter();
+  const brand = getClientBrand();
 
   const handleLogout = async () => {
     await logout();
@@ -19,8 +21,8 @@ export default function AmazonNav() {
     <header className="amz-navbar">
       <div className="max-w-[1500px] mx-auto px-4 h-12 sm:h-14 flex items-center gap-4 sm:gap-8">
         <Link href="/" className="text-base sm:text-lg font-bold whitespace-nowrap shrink-0">
-          <span className="text-[#ff9900]">aplus</span>
-          <span className="text-white">-builder</span>
+          <span style={{ color: brand.accent }}>{brand.logoPart1}</span>
+          <span className="text-white">{brand.logoPart2}</span>
         </Link>
 
         <nav className="flex items-center gap-4 sm:gap-6 text-xs sm:text-sm flex-1 overflow-x-auto">

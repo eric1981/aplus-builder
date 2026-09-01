@@ -1,0 +1,105 @@
+/**
+ * 品牌/主题配置（多客户定制化）
+ *
+ * 每个客户一个主题配置（logo、品牌色、首页文案、页脚文案等），
+ * 通过环境变量 CUSTOMER_ID 选择；不设置时使用默认主题（aplus-builder）。
+ *
+ * 注意：本文件同时被服务端组件（layout/page）与客户端组件（nav）引用，
+ * 客户端只能读取 NEXT_PUBLIC_ 前缀的环境变量 —— 因此主题选择只依赖
+ * CUSTOMER_ID（服务端注入），页面/组件用它查表即可。
+ */
+
+export interface BrandTheme {
+  /** 品牌名（显示用） */
+  name: string;
+  /** logo 第一部分（高亮色）与第二部分 */
+  logoPart1: string;
+  logoPart2: string;
+  /** 品牌主色（导航 logo 高亮、按钮等） */
+  accent: string;
+  /** 页脚副标题 */
+  tagline: string;
+  /** 首页 hero */
+  hero: {
+    badge: string;
+    title: string;
+    subtitle: string;
+    pipeline: string;
+    cta: string;
+  };
+  /** 首页三步流程 */
+  steps: { step: string; title: string; desc: string }[];
+  /** 首页特性 */
+  features: { label: string; value: string; sub: string }[];
+  /** 页脚版权行 */
+  copyright: string;
+}
+
+/** 默认主题：aplus-builder（亚马逊风格） */
+const DEFAULT_THEME: BrandTheme = {
+  name: "aplus-builder",
+  logoPart1: "aplus",
+  logoPart2: "-builder",
+  accent: "#ff9900",
+  tagline: "Amazon A+ 视觉工业流水线：产品图 → AI 生图 → 详情页排版 → 交付",
+  hero: {
+    badge: "AI 生成 · 一键交付",
+    title: "aplus builder 视觉工业流水线",
+    subtitle: "上传一张白底产品图，AI 自动完成全流程",
+    pipeline: "产品特征分析 → Amazon大卖视觉分析 → 多场景图生成 → A+ 详情页排版 → 一键下载交付",
+    cta: "✨ 开始使用",
+  },
+  steps: [
+    { step: "①", title: "上传产品图", desc: "拖拽或点击上传一张白底产品照，支持 JPG/PNG/WebP。可选填产品描述帮助 AI 更准确。" },
+    { step: "②", title: "AI 自动生成", desc: "AI 分析产品特征与 Amazon 大卖视觉，生成 5-8 张场景图，再排版成 A+ 详情页。约 2-5 分钟。" },
+    { step: "③", title: "下载交付", desc: "预览 A+ 详情页效果，单独下载每张图或一键打包全部。直接上传 Amazon。" },
+  ],
+  features: [
+    { label: "内置风格", value: "5 种", sub: "+14 变体模板" },
+    { label: "场景图生成", value: "5-8 张", sub: "AI 图生图" },
+    { label: "AI 偏好学习", value: "自动", sub: "越用越懂你" },
+    { label: "输出格式", value: "HTML+图", sub: "直接上传 Amazon" },
+  ],
+  copyright: "面向 Amazon 卖家的 AI 视觉内容工具",
+};
+
+/**
+ * 客户主题表：新增客户时在此加一项即可（无需改组件代码）。
+ * key 对应 CUSTOMER_ID 环境变量值。
+ */
+const CUSTOMER_THEMES: Record<string, BrandTheme> = {
+  // 示例客户 A：换个 logo 与首页标题
+  "customer-a": {
+    ...DEFAULT_THEME,
+    name: "Brand A",
+    logoPart1: "Brand",
+    logoPart2: "A",
+    tagline: "AI 电商视觉流水线：从产品图到上架素材，一步到位",
+    hero: {
+      badge: "AI 生成 · 一键交付",
+      title: "Brand A 电商视觉流水线",
+      subtitle: "上传一张产品图，AI 自动完成全流程",
+      pipeline: "产品特征分析 → 竞品视觉分析 → 多场景图生成 → 详情页排版 → 一键下载交付",
+      cta: "✨ 立即开始",
+    },
+    copyright: "面向全球卖家的 AI 视觉内容工具",
+  },
+};
+
+/** 运行时选择的主题（CUSTOMER_ID 环境变量，服务端注入） */
+export function getBrandTheme(customerId?: string): BrandTheme {
+  const id = customerId || process.env.CUSTOMER_ID || "";
+  return CUSTOMER_THEMES[id] || DEFAULT_THEME;
+}
+
+/** 服务端组件用：直接读环境变量 */
+export function getCurrentBrand(): BrandTheme {
+  return getBrandTheme();
+}
+
+/** 客户端组件用：只能拿到 NEXT_PUBLIC_CUSTOMER_ID（服务端注入到 bundle） */
+export function getClientBrand(): BrandTheme {
+  return getBrandTheme(
+    typeof process !== "undefined" ? process.env.NEXT_PUBLIC_CUSTOMER_ID : undefined,
+  );
+}
