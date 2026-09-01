@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, existsSync } from "fs";
 import { join, resolve, sep } from "path";
+import { gzipSync } from "zlib";
 import { NextRequest, NextResponse } from "next/server";
 import { userBase } from "@/lib/config";
 import { taskStore } from "@/app/api/generate/task-store";
@@ -91,12 +92,27 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    const payload = {
       html,
       images,
       variants,
       prediction: taskStore.getPredictionByDir(dirName),
-    });
+    };
+    const json = JSON.stringify(payload);
+
+    // 远程/隧道访问（如 ngrok）带宽有限：gzip 压缩可把 base64 图片响应从 ~24MB 压到 ~4MB，
+    // 并允许浏览器/前端缓存，避免每次预览都全量重传。
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      // 产出目录名唯一且内容不变，可安全缓存 10 分钟
+      "Cache-Control": "private, max-age=600",
+      "Vary": "Cookie",
+    };
+    if (json.length > 1024) {
+      headers["Content-Encoding"] = "gzip";
+      return new NextResponse(gzipSync(json), { headers });
+    }
+    return new NextResponse(json, { headers });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

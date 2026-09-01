@@ -30,13 +30,26 @@ export async function getHistory(): Promise<HistoryEntry[]> {
   }
 }
 
+// 预览输出缓存：同一目录只下载一次（产出内容不变），避免远程/隧道访问下反复全量拉取 base64 图片
+const outputCache = new Map<string, LoadedOutput>();
+const OUTPUT_CACHE_MAX = 20;
+
 export async function loadOutput(dirName: string): Promise<LoadedOutput | null> {
+  const cached = outputCache.get(dirName);
+  if (cached) return cached;
   try {
     const res = await apiFetch(
       `/api/load-output?dir=${encodeURIComponent(dirName)}`,
     );
     if (!res.ok) return null;
-    return await res.json();
+    const data = await res.json();
+    outputCache.set(dirName, data);
+    // 简单 LRU：超过上限时删最早的
+    if (outputCache.size > OUTPUT_CACHE_MAX) {
+      const oldest = outputCache.keys().next().value;
+      if (oldest) outputCache.delete(oldest);
+    }
+    return data;
   } catch {
     return null;
   }
