@@ -57,7 +57,7 @@ export default function Landing() {
       )}
 
       {/* 三步流程 */}
-      <div className="max-w-4xl mx-auto px-4 pb-12 sm:pb-16">
+      <div className="max-w-4xl mx-auto px-4 pt-16 sm:pt-24 pb-12 sm:pb-16">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
           {brand.steps.map((item) => (
             <div key={item.step} className="bg-white rounded-2xl border border-border p-4 sm:p-6 hover:shadow-sm transition-shadow">
