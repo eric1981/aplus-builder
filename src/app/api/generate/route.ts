@@ -30,6 +30,8 @@ type Task = {
   status: "running" | "done" | "error" | "queued";
   /** 任务产出目录（轮询时实时扫描已产出图片用） */
   workDir?: string;
+  /** agent 写的人类可读进度（progress.log 最近 N 行） */
+  progress?: string[];
   html?: string;
   images?: TaskImage[];
   variants?: { name: string; html: string }[];
@@ -548,6 +550,7 @@ export async function POST(request: NextRequest) {
         `- 不要生成 HTML 详情页 —— 只出一张场景图。`,
         `- 不要询问我任何问题，自己决定所有选择。`,
         `- ⛔ 严禁重命名、移动或删除任务目录（${workDir}）及其任何父级目录。`,
+        `- 📍 进度报告：每个关键步骤（Vision 分析/生图/QC/完成）执行时，向 ${join(workDir, "progress.log")} 追加一行：[HH:MM:SS] 简短中文描述（echo >> 追加，勿覆盖）。`,
         `- 把图片保存到 ${deliverablesDir}/scene_01.png。`,
         `- 在 ${deliverablesDir}/ 下创建一个简单的 index.html，只内嵌这张场景图：<img src="./scene_01.png" style="width:100%;max-width:800px;margin:0 auto;display:block;">`,
         `- 在 image-manifest.json 中记录图片使用的 prompt。`,
@@ -577,6 +580,9 @@ export async function POST(request: NextRequest) {
         `【重要规则】`,
         `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
         `- ⛔ 严禁重命名、移动或删除任务目录（${workDir}）及其任何父级目录。`,
+        `- 📍 进度报告：每个关键步骤（Vision 分析/每张图生成/HTML排版/QC/完成）执行时，`,
+        `  向 ${join(workDir, "progress.log")} 追加一行：[HH:MM:SS] 简短中文描述（用 echo >> 追加，勿覆盖）。`,
+        `  例：echo "[$(date '+%H:%M:%S')] 生成场景图 2/5…" >> ${join(workDir, "progress.log")}`,
         `- ⚠️ 所有 HTML、变体HTML、图片必须放进 output/ 子目录，不可散落在根目录。`,
         `- 把最终交付物（index.html、变体HTML、图片）全部放到 ${deliverablesDir}/ 下面。`,
         `- 把元数据文件（image-manifest.json）放到 ${workDir}/ 下面。`,
@@ -675,6 +681,19 @@ export async function POST(request: NextRequest) {
 
 // ===== 轮询 =====
 
+/** 读取任务 progress.log（agent 写入的人类可读进度），返回最近 N 行 */
+function readProgressLines(workDir: string | undefined, maxLines = 10): string[] {
+  if (!workDir) return [];
+  try {
+    const p = join(workDir, "progress.log");
+    if (!existsSync(p)) return [];
+    const text = readFileSync(p, "utf-8");
+    return text.split("\n").map((l) => l.trim()).filter(Boolean).slice(-maxLines);
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(request: NextRequest) {
   const taskId = request.nextUrl.searchParams.get("taskId");
   if (!taskId) return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
@@ -684,6 +703,9 @@ export async function GET(request: NextRequest) {
     const keys = [...tasks.keys()];
     for (let i = 0; i < keys.length - 100; i++) tasks.delete(keys[i]);
   }
+
+  // 读 agent 写的人类可读进度（progress.log）；各状态都读，便于完成前后连续展示
+  task.progress = readProgressLines(task.workDir);
 
   // 运行中/排队中：实时扫描磁盘产出目录，已生成的图片一张出一张（渐进展示）。
   // 全量模式图片在 output/ 子目录，单图模式在任务根目录，两个位置都扫。

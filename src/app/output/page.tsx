@@ -32,6 +32,8 @@ interface QueueItem {
   error?: string;
   /** Agent 实时日志（显示系统正在执行什么任务） */
   agentLog?: string;
+  /** Agent 人类可读进度（progress.log 行，优先展示） */
+  progress?: string[];
   completedAt?: number;
   /** 市场潜力预测 */
   prediction?: { status: "running" | "done" | "error"; data?: PredictionData | null; error?: string };
@@ -127,6 +129,26 @@ function addSignal(profile: PreferenceProfile, signal: string): PreferenceProfil
     profile.pending_signals = profile.pending_signals.slice(-10);
   }
   return profile;
+}
+
+/** 过滤 hermes agent 日志中的 diff/代码噪音，只保留可读叙述行 */
+function filterAgentLogLines(log: string): string {
+  return log.split("\n")
+    .filter((l) => {
+      const t = l.trim();
+      if (!t) return false;
+      // 过滤 diff/路径/代码噪音
+      if (/^[+\-@]/.test(t)) return false;
+      if (/^(a|b)\//.test(t)) return false;
+      if (t.startsWith("@@")) return false;
+      if (t.startsWith("```")) return false;
+      if (/^(print|import|def|from)\b/.test(t)) return false;
+      if (t.startsWith("#!") || t.startsWith("#!/")) return false;
+      if (/^(out|prompt|ref|size|watermark|response_format)\s*=/.test(t)) return false;
+      return true;
+    })
+    .slice(-6)
+    .join("\n");
 }
 
 // ===== 工具 =====
@@ -448,14 +470,18 @@ export default function OutputPage() {
                 prev.map((p) => (p.id === qi.id ? { ...p, status: "running" } : p))
               );
             } else if (task.status === "running") {
-              // 运行中：更新 Agent 实时日志 + 渐进展示已产出的图片（一张出一张）
+              // 运行中：更新进度（progress.log 优先，agent 日志兜底）+ 渐进展示图片
               const imgs = (task.images || []).map((img: any) => ({ name: img.name, base64: img.base64, mime: img.mime }));
+              const progress = Array.isArray(task.progress) && task.progress.length > 0
+                ? task.progress
+                : undefined;
               setQueueItems((prev) =>
                 prev.map((p) =>
                   p.id === qi.id
                     ? {
                         ...p,
-                        agentLog: typeof task.log === "string" ? task.log : p.agentLog,
+                        progress: progress || p.progress,
+                        agentLog: !progress && typeof task.log === "string" ? task.log : p.agentLog,
                         images: imgs.length > 0 ? imgs : p.images,
                       }
                     : p
@@ -774,11 +800,23 @@ export default function OutputPage() {
                     )}
                   </div>
 
-                  {/* Agent 实时进度：显示系统正在执行什么任务 */}
-                  {qi.status === "running" && qi.agentLog && (
+                  {/* Agent 实时进度：显示系统正在执行什么任务（progress.log 优先，agent 日志兜底） */}
+                  {qi.status === "running" && qi.progress && qi.progress.length > 0 && (
                     <div className="mt-3 rounded-lg bg-white/70 border border-blue-100 p-2.5">
-                      <pre className="text-[11px] leading-relaxed text-blue-900 font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
-                        {qi.agentLog.split("\n").filter((l) => l.trim()).slice(-8).join("\n")}
+                      <div className="space-y-1">
+                        {qi.progress.map((line, i) => (
+                          <p key={i} className="text-[11px] leading-relaxed text-blue-900 flex items-start gap-1.5">
+                            <span className="text-blue-400 mt-px">▸</span>
+                            <span className="whitespace-pre-wrap break-words">{line}</span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {qi.status === "running" && (!qi.progress || qi.progress.length === 0) && qi.agentLog && (
+                    <div className="mt-3 rounded-lg bg-white/70 border border-blue-100 p-2.5">
+                      <pre className="text-[11px] leading-relaxed text-blue-900 font-mono whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                        {filterAgentLogLines(qi.agentLog)}
                       </pre>
                     </div>
                   )}
