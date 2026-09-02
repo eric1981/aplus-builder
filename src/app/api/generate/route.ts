@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
-import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync, renameSync } from "fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, readdirSync } from "fs";
 import { join, extname, dirname, relative } from "path";
 import { randomUUID } from "crypto";
 import { taskStore } from "./task-store";
@@ -115,12 +115,10 @@ const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/j
 // ===== Agent 启动（被 POST 和 recovery 共用）=====
 
 function spawnAgent(taskId: string, workDir: string, customTemplateId: string | undefined, userId: string) {
-  // 当前任务目录：agent 可能按 manifest 产品名重命名目录，这里跟踪最新目录名
-  // （finalize/恢复补记时必须用重命名后的目录，否则 DB dir_name 与磁盘不一致）
-  let currentWorkDir = workDir;
+  // 目录在任务创建时由 vision 定名固定，agent 禁止改名，全程不再重命名
   let outputDir = join(workDir, "output");       // 客户交付物放 output/ 子目录
   let indexHtml = join(outputDir, "index.html");
-  let manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录（随目录重命名而更新）
+  const manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录
   const logFile = join(workDir, "agent.log");
   const scriptPath = join(workDir, "run.sh");
   // 任务产出目录（collectAndFinish 内更新），用于计算历史记录的首图相对路径
@@ -149,13 +147,13 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     if (settled) return;
     settled = true;
     children.delete(taskId);
-    tasks.set(taskId, { status, workDir: currentWorkDir, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
+    tasks.set(taskId, { status, workDir, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
     // 数据库持久化：完成/失败都保留记录（历史 + 审计）
     if (status === "done") {
       const base = userBase(userId);
       taskStore.markDone(taskId, {
         productName,
-        dirName: relative(base, currentWorkDir),
+        dirName: relative(base, workDir),
         imageCount: images?.length || 0,
         firstImage:
           images && images.length > 0
@@ -180,7 +178,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
       let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
       const endIdx = html.lastIndexOf("</html>");
       if (endIdx !== -1) html = html.substring(0, endIdx + 7);
-      return embedImages(html, imgDir || outputDir, currentWorkDir);
+      return embedImages(html, imgDir || outputDir, workDir);
     } catch {
       return null;
     }
@@ -189,7 +187,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
   const collectAndFinish = () => {
     // 主路径 output/index.html，兼容旧路径根目录 index.html
     const actualIndex = existsSync(indexHtml) ? indexHtml
-      : existsSync(join(currentWorkDir, "index.html")) ? join(currentWorkDir, "index.html")
+      : existsSync(join(workDir, "index.html")) ? join(workDir, "index.html")
       : null;
     if (!actualIndex) return false;
     actualOutputDir = dirname(actualIndex);
@@ -241,7 +239,8 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
         }
       }
 
-      // 从 manifest 提取产品名并重命名目录（先于 finalize，以便传给前端）
+      // 从 manifest 提取产品名（仅用于展示，不重命名目录 —— 目录已在任务创建时
+      // 由 vision 定名固定，agent 也禁止改名；目录名与 DB 全程一致）
       let finalProductName = "";
       if (existsSync(manifestPath)) {
         try {
@@ -252,17 +251,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
             : typeof product === "string" ? product : "";
           const chinese = category.replace(/\(.*?\)/g, "").trim()
             .replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-          if (chinese && !workDir.endsWith(chinese)) {
-            const parent = dirname(workDir);
-            const newWorkDir = join(parent, `${chinese}-${taskId.slice(0, 8)}`);
-            renameSync(workDir, newWorkDir);
-            currentWorkDir = newWorkDir;
-            manifestPath = join(newWorkDir, "image-manifest.json");
-            outputDir = join(newWorkDir, "output");
-            indexHtml = join(outputDir, "index.html");
-            finalProductName = chinese;
-            console.log(`[hermes-cli] 📁 已重命名并通知：${newWorkDir}`);
-          }
+          if (chinese) finalProductName = chinese;
         } catch {}
       }
 
@@ -397,12 +386,17 @@ export async function POST(request: NextRequest) {
     const workDir = customerDir
       ? join(base, customerDir, productDir)
       : join(base, productDir);
+    // 交付物目录约定（与 spawnAgent 内部一致）：
+    //   detail 模式 → workDir/output（output/ 子目录）
+    //   single 模式 → workDir（场景图直接放任务根目录）
+    const mode = (formData.get("mode") as string) || "detail";
+    const deliverablesDir = mode === "single" ? workDir : join(workDir, "output");
     const inputDir = join(workDir, "input");
-    const outputDir = workDir;
     const promptFile = join(workDir, "prompt.txt");
 
+    // 建目录：input/ + 交付目录（mkdirSync recursive 顺带建 workDir）
     mkdirSync(inputDir, { recursive: true });
-    mkdirSync(outputDir, { recursive: true });
+    mkdirSync(deliverablesDir, { recursive: true });
 
     // 逐项提取文件（不用 entries() 遍历，避免 Blob instanceof 不可靠）
     const modelImage = formData.get("model_image_0");
@@ -423,7 +417,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Logo 无效：仅支持 PNG/JPEG/WebP，且不超过 15MB" }, { status: 400 });
       }
       const { buffer, ext } = validated;
-      logoPath = join(outputDir, `logo.${ext}`);
+      logoPath = join(inputDir, `logo.${ext}`);
       writeFileSync(logoPath, buffer);
     }
 
@@ -519,8 +513,6 @@ export async function POST(request: NextRequest) {
       prefLines.push(profileContext);
     }
 
-    const mode = (formData.get("mode") as string) || "detail";
-
     const descBlock = description.trim()
       ? `\n产品信息：${description}\n`
       : (mode === "single"
@@ -546,8 +538,9 @@ export async function POST(request: NextRequest) {
         `- 不要生成白底抠图、多角度图、详情页长图或多张场景图，就一张。`,
         `- 不要生成 HTML 详情页 —— 只出一张场景图。`,
         `- 不要询问我任何问题，自己决定所有选择。`,
-        `- 把图片保存到 ${outputDir}/scene_01.png。`,
-        `- 在 ${outputDir}/ 下创建一个简单的 index.html，只内嵌这张场景图：<img src="./scene_01.png" style="width:100%;max-width:800px;margin:0 auto;display:block;">`,
+        `- ⛔ 严禁重命名、移动或删除任务目录（${workDir}）及其任何父级目录。`,
+        `- 把图片保存到 ${deliverablesDir}/scene_01.png。`,
+        `- 在 ${deliverablesDir}/ 下创建一个简单的 index.html，只内嵌这张场景图：<img src="./scene_01.png" style="width:100%;max-width:800px;margin:0 auto;display:block;">`,
         `- 在 image-manifest.json 中记录图片使用的 prompt。`,
         `- 生成完成后直接结束，不要迭代优化。`,
       ].join("\n");
@@ -574,16 +567,17 @@ export async function POST(request: NextRequest) {
         ] : []),
         `【重要规则】`,
         `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
+        `- ⛔ 严禁重命名、移动或删除任务目录（${workDir}）及其任何父级目录。`,
         `- ⚠️ 所有 HTML、变体HTML、图片必须放进 output/ 子目录，不可散落在根目录。`,
-        `- 把最终交付物（index.html、变体HTML、图片）全部放到 ${outputDir}/ 下面。`,
+        `- 把最终交付物（index.html、变体HTML、图片）全部放到 ${deliverablesDir}/ 下面。`,
         `- 把元数据文件（image-manifest.json）放到 ${workDir}/ 下面。`,
         `- HTML 里的图片使用相对路径（如 ./scene_01.png）。`,
         `- 生成完成后直接写入 index.html，不要无限迭代优化。`,
         `- 在 image-manifest.json 中记录每张图使用的 prompt。`,
         ``,
         `【多版本输出 — 使用同一套图片，生成多个风格变体】`,
-        `- 主输出（用户选的风格）：${outputDir}/index.html`,
-        ...variantStyles.map((s, i) => `- 变体 ${i + 1}（${s}）：${outputDir}/variant_${i + 1}.html`),
+        `- 主输出（用户选的风格）：${deliverablesDir}/index.html`,
+        ...variantStyles.map((s, i) => `- 变体 ${i + 1}（${s}）：${deliverablesDir}/variant_${i + 1}.html`),
         `- 所有变体 HTML 都必须包含相同的一套图片，只改变排版/字体/颜色/布局。`,
         `- 每个变体的风格必须适合该产品的品类和调性，不要选与产品气质冲突的模板或配色。`,
         `- 文件名必须严格使用 index.html、variant_1.html、variant_2.html。`,
