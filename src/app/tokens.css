@@ -37,10 +37,6 @@
   /* 链接蓝（亚马逊特色；页面按需用 text-link） */
   --link: #007185;
 
-  /* ─── Accent states ────────────────────────────────────────────── */
-  --accent-hover: var(--accent-hover);
-  --accent-active: var(--accent-active);
-
   /* ─── Semantic ─────────────────────────────────────────────────── */
   --success: #067d62;
   --warn: #b12704;
