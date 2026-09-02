@@ -113,9 +113,12 @@ const MIME_MAP: Record<string, string> = { ".png": "image/png", ".jpg": "image/j
 // ===== Agent 启动（被 POST 和 recovery 共用）=====
 
 function spawnAgent(taskId: string, workDir: string, customTemplateId: string | undefined, userId: string) {
+  // 当前任务目录：agent 可能按 manifest 产品名重命名目录，这里跟踪最新目录名
+  // （finalize/恢复补记时必须用重命名后的目录，否则 DB dir_name 与磁盘不一致）
+  let currentWorkDir = workDir;
   let outputDir = join(workDir, "output");       // 客户交付物放 output/ 子目录
   let indexHtml = join(outputDir, "index.html");
-  const manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录
+  let manifestPath = join(workDir, "image-manifest.json");  // 元数据留根目录（随目录重命名而更新）
   const logFile = join(workDir, "agent.log");
   const scriptPath = join(workDir, "run.sh");
   // 任务产出目录（collectAndFinish 内更新），用于计算历史记录的首图相对路径
@@ -144,13 +147,13 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     if (settled) return;
     settled = true;
     children.delete(taskId);
-    tasks.set(taskId, { status, workDir, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
+    tasks.set(taskId, { status, workDir: currentWorkDir, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
     // 数据库持久化：完成/失败都保留记录（历史 + 审计）
     if (status === "done") {
       const base = userBase(userId);
       taskStore.markDone(taskId, {
         productName,
-        dirName: relative(base, workDir),
+        dirName: relative(base, currentWorkDir),
         imageCount: images?.length || 0,
         firstImage:
           images && images.length > 0
@@ -175,7 +178,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
       let html = raw.replace(/^```html?\s*\n?/i, "").replace(/\n?```\s*$/, "");
       const endIdx = html.lastIndexOf("</html>");
       if (endIdx !== -1) html = html.substring(0, endIdx + 7);
-      return embedImages(html, imgDir || outputDir, workDir);
+      return embedImages(html, imgDir || outputDir, currentWorkDir);
     } catch {
       return null;
     }
@@ -184,7 +187,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
   const collectAndFinish = () => {
     // 主路径 output/index.html，兼容旧路径根目录 index.html
     const actualIndex = existsSync(indexHtml) ? indexHtml
-      : existsSync(join(workDir, "index.html")) ? join(workDir, "index.html")
+      : existsSync(join(currentWorkDir, "index.html")) ? join(currentWorkDir, "index.html")
       : null;
     if (!actualIndex) return false;
     actualOutputDir = dirname(actualIndex);
@@ -251,6 +254,8 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
             const parent = dirname(workDir);
             const newWorkDir = join(parent, `${chinese}-${taskId.slice(0, 8)}`);
             renameSync(workDir, newWorkDir);
+            currentWorkDir = newWorkDir;
+            manifestPath = join(newWorkDir, "image-manifest.json");
             outputDir = join(newWorkDir, "output");
             indexHtml = join(outputDir, "index.html");
             finalProductName = chinese;
