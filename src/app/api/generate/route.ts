@@ -420,6 +420,11 @@ export async function POST(request: NextRequest) {
     const customerRequirements = (formData.get("customer_requirements") as string) || "";
     const customTemplateId = (formData.get("custom_template_id") as string) || "";
     const category = (formData.get("category") as string) || "";
+    // 款式选项（上装/下装：长度 + 版型）
+    const topLength = (formData.get("top_length") as string) || "";
+    const topFit = (formData.get("top_fit") as string) || "";
+    const bottomLength = (formData.get("bottom_length") as string) || "";
+    const bottomFit = (formData.get("bottom_fit") as string) || "";
 
     let uiPrefs: { style?: string; odStyle?: string; model?: string } = {};
     try {
@@ -430,6 +435,16 @@ export async function POST(request: NextRequest) {
     // ---- prompt 组装 ----
     const prefLines: string[] = [];
     if (category) prefLines.push(`- 品类：${category}（用户指定，生成时必须匹配此品类）`);
+
+    // 款式约束：长度 + 版型（上装/下装），用户指定时必须严格遵守
+    const styleSpecs: string[] = [];
+    if (topLength) styleSpecs.push(`上装长度为「${topLength}」`);
+    if (topFit) styleSpecs.push(`上装版型为「${topFit}」`);
+    if (bottomLength) styleSpecs.push(`下装长度为「${bottomLength}」`);
+    if (bottomFit) styleSpecs.push(`下装版型为「${bottomFit}」`);
+    if (styleSpecs.length > 0) {
+      prefLines.push(`- 款式要求：${styleSpecs.join("，")}（用户指定，生成时必须在版型/长度上严格遵守，模特穿着需清晰体现）`);
+    }
 
     // 客户自定义风格模板优先级最高
     if (customTemplateId) {

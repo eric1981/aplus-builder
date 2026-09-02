@@ -135,6 +135,11 @@ export default function BuildPage() {
   const [formDescription, setFormDescription] = useState("");
   const [formProductName, setFormProductName] = useState("");
   const [formCategory, setFormCategory] = useState("");
+  // 款式选项：上装（长度/版型）+ 下装（长度/版型）
+  const [formTopLength, setFormTopLength] = useState("");
+  const [formTopFit, setFormTopFit] = useState("");
+  const [formBottomLength, setFormBottomLength] = useState("");
+  const [formBottomFit, setFormBottomFit] = useState("");
 
   // -- 队列（轻量，不轮询）--
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
@@ -239,6 +244,7 @@ export default function BuildPage() {
     setFormModelImage(null); setFormModelImageFile(null);
     setFormLogoImage(null); setFormLogoImageFile(null);
     setFormDescription(""); setFormProductName(""); setFormCategory("");
+    setFormTopLength(""); setFormTopFit(""); setFormBottomLength(""); setFormBottomFit("");
   };
 
   // -- 加入队列 --
@@ -269,6 +275,10 @@ export default function BuildPage() {
       formData.append("description", item.description);
       formData.append("product_name", item.productName);
       if (formCategory) formData.append("category", formCategory);
+      if (formTopLength) formData.append("top_length", formTopLength);
+      if (formTopFit) formData.append("top_fit", formTopFit);
+      if (formBottomLength) formData.append("bottom_length", formBottomLength);
+      if (formBottomFit) formData.append("bottom_fit", formBottomFit);
       formData.append("mode", generationMode);
       formData.append("preferences", JSON.stringify(prefs));
 
@@ -462,6 +472,56 @@ export default function BuildPage() {
           </div>
           {!formCategory && <p className="text-xs text-red-400 mt-1">请选择产品品类</p>}
         </div>
+
+        {/* ===== 款式选项（按品类显示长度/版型）===== */}
+        {(() => {
+          // 上装类：上衣 / 上衣（2件套）；下装类：裤子 / 裙装；套装：两者都显示
+          const TOP_CATS = ["上衣", "上衣（2件套）"];
+          const BOTTOM_CATS = ["裤子", "裙装"];
+          const isTop = TOP_CATS.includes(formCategory);
+          const isBottom = BOTTOM_CATS.includes(formCategory);
+          const isSet = formCategory === "套装";
+          if (!isTop && !isBottom && !isSet) return null;
+
+          const Pill = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
+            <button type="button" onClick={onClick}
+              className={`px-3 py-1 rounded-lg text-xs font-medium border transition
+                ${active ? "bg-accent text-accent-on border-accent" : "bg-surface text-muted border-border hover:border-accent"}`}>
+              {children}
+            </button>
+          );
+          const Group = ({ title, values, current, onChange }: { title: string; values: string[]; current: string; onChange: (v: string) => void }) => (
+            <div>
+              <p className="text-xs font-medium text-text-muted mb-1.5">{title}</p>
+              <div className="flex flex-wrap gap-2">
+                {values.map((v) => (
+                  <Pill key={v} active={current === v} onClick={() => onChange(current === v ? "" : v)}>{v}</Pill>
+                ))}
+              </div>
+            </div>
+          );
+
+          const TOP_LENGTHS = ["腰部", "臀部", "长款（臀部以下）"];
+          const BOTTOM_LENGTHS = ["脚踝以上", "脚踝以下"];
+          const FITS = ["正常", "紧身", "宽松"];
+
+          return (
+            <div className="mt-2 p-4 bg-gray-50 rounded-xl space-y-4">
+              {(isTop || isSet) && (
+                <>
+                  <Group title="上装 · 长度" values={TOP_LENGTHS} current={formTopLength} onChange={setFormTopLength} />
+                  <Group title="上装 · 版型" values={FITS} current={formTopFit} onChange={setFormTopFit} />
+                </>
+              )}
+              {(isBottom || isSet) && (
+                <>
+                  <Group title="下装 · 长度" values={BOTTOM_LENGTHS} current={formBottomLength} onChange={setFormBottomLength} />
+                  <Group title="下装 · 版型" values={FITS} current={formBottomFit} onChange={setFormBottomFit} />
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ===== 产品名称 ===== */}
         <div>
