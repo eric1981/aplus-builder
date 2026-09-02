@@ -11,6 +11,7 @@ import { logAudit } from "@/lib/audit";
 import { screenshotPage } from "@/lib/screenshot";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
 import { startMarketAnalysis, normalizePrediction, type MarketPrediction } from "@/lib/market-analysis";
+import { identifyProductName } from "@/lib/product-vision";
 
 function sanitizeProductName(description: string, taskId: string): string {
   const tid = taskId.slice(0, 8);
@@ -354,12 +355,10 @@ export async function POST(request: NextRequest) {
     const userId = request.headers.get("x-user-id") || "admin";
     const base = userBase(userId);
 
-    // 先取 description 和 product_name 用于目录命名
+    // 先取 description 和 product_name 用于目录命名（vision 定名失败时的降级名）
     const description = (formData.get("description") as string) || "";
     const productNameInput = (formData.get("product_name") as string) || "";
     const customerName = (formData.get("customer_name") as string) || "";
-
-    const productDir = sanitizeProductName(productNameInput || description, taskId);
 
     // 客户名安全化（跟 sanitizeProductName 逻辑一致但不需要 taskId fallback）
     const customerDir = customerName
@@ -368,6 +367,31 @@ export async function POST(request: NextRequest) {
           .replace(/\s+/g, "-").replace(/-+/g, "-")
           .replace(/^-|-$/g, "")
       : "";
+
+    // ── 产品识别定名（Ark Vision）：建目录前先识别产品并定名 ──
+    // 目录名从创建起就是最终产品名，agent 全程使用同一路径，消除
+    // "生成后按 manifest 重命名目录"导致的 dir_name 与磁盘不一致问题。
+    // vision 失败（无 key/超时/网络/非图片）时降级到用户输入/描述命名。
+    let visionProductName = "";
+    const productImageBlob = formData.get("image_0");
+    if (productImageBlob && typeof productImageBlob === "object" && "arrayBuffer" in productImageBlob) {
+      const validated = await validateImageBlob(productImageBlob as Blob);
+      if (validated) {
+        try {
+          const identity = await identifyProductName(validated.buffer, validated.ext);
+          if (identity?.chinese) {
+            visionProductName = identity.chinese;
+            console.log(`[product-vision] 📛 识别产品名：${identity.name}`);
+          }
+        } catch {
+          // vision 异常静默降级
+        }
+      }
+    }
+
+    // 目录命名：vision 识别名优先，其次用户 product_name，再次 description
+    const namingSource = visionProductName || productNameInput || description;
+    const productDir = sanitizeProductName(namingSource, taskId);
 
     const workDir = customerDir
       ? join(base, customerDir, productDir)
@@ -440,6 +464,10 @@ export async function POST(request: NextRequest) {
     // ---- prompt 组装 ----
     const prefLines: string[] = [];
     if (category) prefLines.push(`- 品类：${category}（用户指定，生成时必须匹配此品类）`);
+    // AI 识别的产品名（同时用于目录命名）：告知 agent 保持命名一致
+    if (visionProductName) {
+      prefLines.push(`- 产品名（AI 识别，任务目录以此命名）：${visionProductName}（生成时产品结构与品类以此为准，image-manifest.json 中 product/category 与此一致）`);
+    }
 
     // 款式约束：长度 + 版型（上装/下装），用户指定时必须严格遵守
     const styleSpecs: string[] = [];
