@@ -280,8 +280,17 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     if (!collectAndFinish()) finalize("error", undefined, "Agent 超时");
   }, getAgentTimeoutMs());
 
-  child.stdout.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
-  child.stderr.on("data", (data: Buffer) => { logBuffer += data.toString(); appendFileSync(logFile, data); });
+  // 实时日志：磁盘 agent.log 全量追加；内存 logBuffer 供轮询 GET 展示
+  // （"Agent 正在执行什么"），并同步到 tasks map 的 log 字段
+  const appendLog = (data: Buffer) => {
+    const text = data.toString();
+    logBuffer += text;
+    appendFileSync(logFile, text);
+    const cur = tasks.get(taskId);
+    if (cur) cur.log = logBuffer.slice(-6000);
+  };
+  child.stdout.on("data", appendLog);
+  child.stderr.on("data", appendLog);
 
   child.on("close", (code) => {
     clearTimeout(timer);
