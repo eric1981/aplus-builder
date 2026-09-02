@@ -133,7 +133,12 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     return;
   }
 
-  tasks.set(taskId, { status: "running", workDir, log: "" });
+  tasks.set(taskId, {
+    status: "running",
+    workDir,
+    log: "",
+    productName: tasks.get(taskId)?.productName || undefined,
+  });
 
   const child = spawn("/bin/bash", [scriptPath], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -638,6 +643,14 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
     });
 
+    // 运行中即可见的任务标题：vision 识别产品名优先，其次用户 product_name
+    const displayProductName = visionProductName || productNameInput || description.slice(0, 40);
+    if (displayProductName) {
+      taskStore.setProductName(taskId, displayProductName);
+      const t = tasks.get(taskId);
+      if (t) t.productName = displayProductName;
+    }
+
     // 审计：任务创建
     logAudit(userId, "task.create", { taskId, mode, workDir });
 
@@ -706,6 +719,18 @@ export async function GET(request: NextRequest) {
 
   // 读 agent 写的人类可读进度（progress.log）；各状态都读，便于完成前后连续展示
   task.progress = readProgressLines(task.workDir);
+
+  // 队列标题兜底：tasks map 缺 productName 时从 DB / 目录名提取
+  // （vision 定名在 POST 已写入 product_name；旧任务无记录时用目录名去 taskId 后缀）
+  if (!task.productName) {
+    try {
+      const row = db.prepare(`SELECT product_name, dir_name FROM tasks WHERE task_id = ?`).get(taskId) as
+        { product_name: string | null; dir_name: string | null } | undefined;
+      const dbName = (row?.product_name || row?.dir_name || "").split("/").pop() || "";
+      const clean = dbName.replace(/-[0-9a-f]{8}$/, "").trim(); // 去掉尾部 taskId 短码
+      if (clean) task.productName = clean;
+    } catch {}
+  }
 
   // 运行中/排队中：实时扫描磁盘产出目录，已生成的图片一张出一张（渐进展示）。
   // 全量模式图片在 output/ 子目录，单图模式在任务根目录，两个位置都扫。

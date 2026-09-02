@@ -76,6 +76,12 @@ class TaskStore {
     db.prepare(`DELETE FROM tasks WHERE task_id = ?`).run(taskId);
   }
 
+  /** 记录 AI 识别/用户指定的产品名（运行中即可见，用于队列标题） */
+  setProductName(taskId: string, productName: string) {
+    db.prepare(`UPDATE tasks SET product_name = COALESCE(?, product_name), updated_at = ? WHERE task_id = ?`)
+      .run(productName || null, Date.now(), taskId);
+  }
+
   get(taskId: string): PersistedTask | undefined {
     const row = db
       .prepare(`SELECT * FROM tasks WHERE task_id = ?`)

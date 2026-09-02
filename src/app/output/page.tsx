@@ -480,6 +480,7 @@ export default function OutputPage() {
                   p.id === qi.id
                     ? {
                         ...p,
+                        productName: typeof task.productName === "string" && task.productName ? task.productName : p.productName,
                         progress: progress || p.progress,
                         agentLog: !progress && typeof task.log === "string" ? task.log : p.agentLog,
                         images: imgs.length > 0 ? imgs : p.images,
