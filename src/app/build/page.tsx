@@ -502,8 +502,13 @@ export default function BuildPage() {
           );
 
           const TOP_LENGTHS = ["腰部", "臀部", "长款（臀部以下）"];
-          const BOTTOM_LENGTHS = ["脚踝以上", "脚踝以下"];
+          const PANTS_LENGTHS = ["脚踝以上", "脚踝以下"];
+          const SKIRT_LENGTHS = ["大腿上部", "膝盖长度", "小腿中部", "脚踝以上", "脚踝以下", "及地"];
           const FITS = ["正常", "紧身", "宽松"];
+
+          // 裙装用裙装长度选项，裤子/套装下装用裤子长度选项
+          const isSkirt = formCategory === "裙装";
+          const bottomLengths = isSkirt ? SKIRT_LENGTHS : PANTS_LENGTHS;
 
           return (
             <div className="mt-2 p-4 bg-gray-50 rounded-xl space-y-4">
@@ -515,7 +520,7 @@ export default function BuildPage() {
               )}
               {(isBottom || isSet) && (
                 <>
-                  <Group title="下装 · 长度" values={BOTTOM_LENGTHS} current={formBottomLength} onChange={setFormBottomLength} />
+                  <Group title="下装 · 长度" values={bottomLengths} current={formBottomLength} onChange={setFormBottomLength} />
                   <Group title="下装 · 版型" values={FITS} current={formBottomFit} onChange={setFormBottomFit} />
                 </>
               )}
