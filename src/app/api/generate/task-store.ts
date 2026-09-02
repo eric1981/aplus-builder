@@ -4,6 +4,8 @@
  * - 历史列表直接查库，不再递归扫描产出目录
  */
 import { db, ensureMigrated } from "@/lib/db";
+import { readdirSync, existsSync, statSync } from "fs";
+import { join } from "path";
 
 export interface PersistedTask {
   taskId: string;
@@ -304,6 +306,75 @@ class TaskStore {
       .prepare(`SELECT COUNT(*) AS c FROM tasks WHERE user_id = ?`)
       .get(userId) as { c: number } | undefined;
     return Number(row?.c || 0);
+  }
+
+  /**
+   * 磁盘一致性修复（启动时对每个真实用户执行一次）：
+   * Agent 中途按 manifest 改目录名等历史原因，导致 DB 中 done 任务行的
+   * dir_name/work_dir 指向已不存在目录或 image_count=0 —— 列表里就看不到。
+   * 按 task_id 短码在用户目录下找到实际目录，修正 dir/work_dir/图数/首图，
+   * error 但产物完整的补记为 done。
+   */
+  reconcileUserDirs(userBaseOf: (userId: string) => string, allUserIds: string[]): number {
+    let fixed = 0;
+    for (const userId of allUserIds) {
+      if (userId === "admin") continue;
+      let diskDirs: string[] = [];
+      try {
+        const userRoot = userBaseOf(userId);
+        diskDirs = readdirSync(userRoot).filter((d) =>
+          existsSync(join(userRoot, d)) && statSync(join(userRoot, d)).isDirectory(),
+        );
+      } catch { continue; }
+      if (diskDirs.length === 0) continue;
+
+      const rows = db
+        .prepare(
+          `SELECT task_id, status FROM tasks
+           WHERE user_id = ? AND task_id NOT LIKE 'legacy-%'`,
+        )
+        .all(userId) as { task_id: string; status: string }[];
+
+      const userRoot = userBaseOf(userId);
+      for (const t of rows) {
+        const tid8 = t.task_id.slice(0, 8);
+        const match = diskDirs.find((d) => d.includes(tid8));
+        if (!match) continue; // 磁盘无对应目录（真失败），不动
+        const realPath = join(userRoot, match);
+
+        // 扫描图片（output/ + 根目录，兼容两种布局）
+        const seen = new Set<string>();
+        const images: string[] = [];
+        for (const d of [join(realPath, "output"), realPath]) {
+          if (!existsSync(d)) continue;
+          try {
+            for (const f of readdirSync(d)) {
+              if (/\.(jpg|jpeg|png|webp)$/i.test(f) && !seen.has(f)) { seen.add(f); images.push(f); }
+            }
+          } catch {}
+        }
+        images.sort();
+        if (images.length === 0) continue;
+
+        // 需要修复的情形：done 但图数不对 / dir 不是实际目录 / error 但产物完整
+        const cur = db
+          .prepare(`SELECT dir_name, image_count, work_dir, status FROM tasks WHERE task_id = ?`)
+          .get(t.task_id) as { dir_name: string | null; image_count: number; work_dir: string | null; status: string } | undefined;
+        if (!cur) continue;
+        const dirNameOk = cur.dir_name === match || cur.dir_name === `${userId}/${match}`;
+        if (dirNameOk && cur.image_count === images.length && cur.status === "done") continue; // 已一致
+
+        const relFirst = `${match}/output/${images[0]}`;
+        db.prepare(
+          `UPDATE tasks SET dir_name = ?, work_dir = ?, image_count = ?,
+             first_image = COALESCE(?, first_image), status = 'done', error = NULL, updated_at = ?
+           WHERE task_id = ?`,
+        ).run(match, realPath, images.length, relFirst, Date.now(), t.task_id);
+        fixed++;
+        console.log(`[reconcile] 🔧 ${userId}/${match}: ${images.length} 图（task ${t.task_id.slice(0, 8)}）`);
+      }
+    }
+    return fixed;
   }
 }
 

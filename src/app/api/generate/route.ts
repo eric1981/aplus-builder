@@ -4,6 +4,7 @@ import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync, rea
 import { join, extname, dirname, relative } from "path";
 import { randomUUID } from "crypto";
 import { taskStore } from "./task-store";
+import { db } from "@/lib/db";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
 import { getAgentHome, getAgentTimeoutMs, userBase } from "@/lib/config";
@@ -775,6 +776,17 @@ function recoverCompletedOutput(
 }
 
 (function recoverTasks() {
+  // 0) 磁盘一致性修复：DB 任务行（done/error）与实际产出目录对齐
+  //    （Agent 中途改名目录等历史原因导致 dir_name/image_count 过期）
+  try {
+    const allUsers = (db.prepare(`SELECT id FROM users WHERE role != 'admin'`).all() as { id: string }[])
+      .map((r) => r.id);
+    const fixed = taskStore.reconcileUserDirs(userBase, allUsers);
+    if (fixed > 0) console.log(`[hermes-cli] 🔧 磁盘一致性修复 ${fixed} 个任务`);
+  } catch (e) {
+    console.log("[hermes-cli] reconcile skipped:", e instanceof Error ? e.message : e);
+  }
+
   // 1) 运行中/排队中任务：产物完整则补记 done，否则重新拉起
   const pending = taskStore.getRecoverable();
   for (const t of pending) {
