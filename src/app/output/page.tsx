@@ -646,7 +646,7 @@ export default function OutputPage() {
       html: item.html || "",
       images: item.images || [],
       variants: item.variants || [],
-      title: item.productName || item.id.slice(-8),
+      title: item.productName || "未命名任务",
       prediction: item.prediction || null,
     });
   };
@@ -794,7 +794,7 @@ export default function OutputPage() {
                 }`}>
                   <div className="flex items-center gap-3">
                     <span>{qi.status === "running" ? "🔵" : "⏳"}</span>
-                    <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || qi.id.slice(-8)}</span>
+                    <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || "未命名任务"}</span>
                     {qi.taskId && (
                       <button onClick={() => cancelTask(qi)} disabled={cancelingIds.has(qi.id)}
                         className="px-2 py-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-40">取消</button>
@@ -840,7 +840,7 @@ export default function OutputPage() {
               {errorItems.map((qi) => (
                 <div key={qi.id} className="flex items-center gap-3 p-3 rounded-xl border text-sm bg-red-50 border-red-200">
                   <span>❌</span>
-                  <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || qi.id.slice(-8)}</span>
+                  <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || "未命名任务"}</span>
                   <button onClick={() => removeQueueItem(qi.id)} className="px-2 py-1 text-xs text-red-500 hover:text-red-700">移除</button>
                 </div>
               ))}
@@ -856,7 +856,7 @@ export default function OutputPage() {
               {doneItems.map((qi) => (
                 <div key={qi.id} className="flex items-center gap-3 p-3 rounded-xl border text-sm bg-green-50 border-green-200">
                   <span>✅</span>
-                  <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || qi.id.slice(-8)}</span>
+                  <span className="flex-1 truncate font-medium">{qi.productName || qi.description?.slice(0, 20) || "未命名任务"}</span>
                   {qi.html && (
                     <button onClick={() => viewDoneItem(qi)} className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">查看</button>
                   )}
