@@ -35,7 +35,19 @@ if [ -n "${CUSTOMER}" ]; then
     exit 1
   fi
 else
-  echo "=== 使用现有构建（默认主题 aplus-builder）==="
+  # 不带参数：期望默认主题（aplus-builder）。检测 .next 是否为客户端主题构建：
+  # 客户端组件把 NEXT_PUBLIC_CUSTOMER_ID 内联为 `?"tuduoduo":void 0` 三元形态
+  # （默认构建保留 env 引用，无此形态）。命中则自动重建默认。
+  if grep -rq '?"tuduoduo":\|?"customer-a":' .next/static/chunks/ 2>/dev/null; then
+    echo "=== 检测到 .next 为客户端主题构建，自动重建默认主题（aplus-builder）==="
+    npm run build
+    if [ $? -ne 0 ]; then
+      echo "默认主题构建失败。"
+      exit 1
+    fi
+  else
+    echo "=== 使用现有构建（默认主题 aplus-builder）==="
+  fi
 fi
 
 echo "=== aplus-builder 启动脚本（端口 ${PORT}，Ctrl+C 停止，日志 server.log）==="
