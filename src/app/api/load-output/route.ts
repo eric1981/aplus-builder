@@ -126,11 +126,52 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── 用户输入回顾：input-meta.json（文字）+ input/ 图片（base64 缩略图）──
+    let inputMeta: Record<string, unknown> | null = null;
+    const inputImages: { key: string; name: string; base64: string; mime: string }[] = [];
+    try {
+      const metaPath = join(dirPath, "input-meta.json");
+      if (existsSync(metaPath)) {
+        inputMeta = JSON.parse(readFileSync(metaPath, "utf-8"));
+      } else {
+        // 存量任务无 meta：从目录名推断产品名（去用户前缀与 taskId 短码）
+        const baseName = dirName.split("/").pop() || "";
+        const guessed = baseName.replace(/-[0-9a-f]{8}$/, "").trim();
+        if (guessed) {
+          inputMeta = { productName: guessed };
+        }
+      }
+      const inputDir = join(dirPath, "input");
+      if (existsSync(inputDir)) {
+        // meta 里记录的 key → 文件名映射；无 meta 时按文件名后缀猜测
+        const known = [
+          ["product", "productImage", "产品图"],
+          ["model_ref", "modelImage", "模特参考"],
+          ["logo", "logoImage", "Logo"],
+        ] as const;
+        for (const [prefix, metaKey, label] of known) {
+          const metaName = inputMeta ? String((inputMeta as Record<string, unknown>)[metaKey] || "") : "";
+          const candidates = metaName ? [metaName] : readdirSync(inputDir).filter((f) => f.startsWith(prefix) && /\.(jpg|jpeg|png|webp)$/i.test(f));
+          for (const name of candidates) {
+            const p = join(inputDir, name);
+            if (!existsSync(p)) continue;
+            const img = readImageBase64(inputDir, name, base);
+            inputImages.push({ key: label, name: img.name, base64: img.base64, mime: img.mime });
+            break; // 每类只取一张
+          }
+        }
+      }
+    } catch {}
+
     const payload = {
       html,
       images,
       variants,
       prediction: taskStore.getPredictionByDir(dirName),
+      input: {
+        meta: inputMeta,
+        images: inputImages,
+      },
     };
     const json = JSON.stringify(payload);
 

@@ -21,6 +21,11 @@ export interface LoadedOutput {
   variants: { name: string; html: string }[];
   /** 市场潜力预测（原始 JSON，可能为空） */
   prediction?: Record<string, unknown> | null;
+  /** 用户输入回顾（生成时的文字与上传图） */
+  input?: {
+    meta: Record<string, unknown> | null;
+    images: { key: string; name: string; base64: string; mime: string }[];
+  } | null;
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {

@@ -606,6 +606,32 @@ export async function POST(request: NextRequest) {
 
     writeFileSync(promptFile, prompt, "utf-8");
 
+    // ── 保存用户输入快照（input-meta.json）：供产出中心回顾"当时输入了什么" ──
+    // 含文字输入（名称/描述/品类/款式/客户）与上传图文件名；图片本体在 input/ 目录
+    try {
+      const inputMeta = {
+        productName: productNameInput || undefined,
+        description: description.trim() ? description : undefined,
+        visionName: visionProductName || undefined,
+        category: category || undefined,
+        mode,
+        style: uiPrefs.style && uiPrefs.style !== "auto" ? uiPrefs.style : undefined,
+        model: uiPrefs.model && uiPrefs.model !== "auto" ? uiPrefs.model : undefined,
+        topLength: topLength || undefined,
+        topFit: topFit || undefined,
+        bottomLength: bottomLength || undefined,
+        bottomFit: bottomFit || undefined,
+        customerName: customerName || undefined,
+        customTemplateId: customTemplateId || undefined,
+        createdAt: new Date().toISOString(),
+        // 上传的图片文件名（input/ 目录下）
+        productImage: imgPath ? imgPath.split("/").pop() : undefined,
+        modelImage: modelRefPath ? modelRefPath.split("/").pop() : undefined,
+        logoImage: logoPath ? logoPath.split("/").pop() : undefined,
+      };
+      writeFileSync(join(workDir, "input-meta.json"), JSON.stringify(inputMeta, null, 2), "utf-8");
+    } catch {}
+
     const script = [
       `#!/bin/bash`,
       `set -eo pipefail`,

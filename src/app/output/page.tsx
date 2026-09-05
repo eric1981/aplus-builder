@@ -337,6 +337,7 @@ export default function OutputPage() {
   const [preview, setPreview] = useState<{
     html: string; images: TaskImage[]; variants: TaskVariant[]; title: string;
     prediction?: { status: string; data?: PredictionData | null; error?: string } | null;
+    input?: { meta: Record<string, unknown> | null; images: { key: string; name: string; base64: string; mime: string }[] } | null;
   } | null>(null);
   // 预览加载失败提示（历史预览/查看任务失败时展示，避免"点了没反应"）
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -632,6 +633,7 @@ export default function OutputPage() {
         variants: data.variants?.map((v: any) => ({ name: v.name, html: embedPreviewImages(v.html, images) })) || [],
         title: entry.dirName,
         prediction: data.prediction ? { status: "done", data: data.prediction as unknown as PredictionData } : null,
+        input: data.input || null,
       });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e: any) {
@@ -648,6 +650,7 @@ export default function OutputPage() {
       variants: item.variants || [],
       title: item.productName || "未命名任务",
       prediction: item.prediction || null,
+      input: null,
     });
   };
 
@@ -716,6 +719,59 @@ export default function OutputPage() {
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight">{preview.title}</h1>
               <button onClick={closePreview} className="text-sm text-text-muted hover:text-red-500">✕ 关闭</button>
             </div>
+
+            {/* ===== 输入回顾：当时输入了什么（图片 + 文字）===== */}
+            {preview.input && (preview.input.meta || (preview.input.images && preview.input.images.length > 0)) && (
+              <div className="border border-border rounded-xl bg-white p-4 sm:p-5">
+                <h3 className="text-sm font-semibold mb-3 text-text-muted">📋 生成时输入</h3>
+                {preview.input.images && preview.input.images.length > 0 && (
+                  <div className="flex flex-wrap gap-3 mb-4">
+                    {preview.input.images.map((img) => (
+                      <div key={img.name} className="flex flex-col items-center gap-1">
+                        <div className="w-20 h-24 sm:w-24 sm:h-28 rounded-lg overflow-hidden bg-gray-100 border border-border">
+                          <img src={`data:${img.mime};base64,${img.base64}`} alt={img.name} className="w-full h-full object-cover" />
+                        </div>
+                        <span className="text-[10px] text-text-muted">{img.key}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {preview.input.meta && (
+                  <div className="space-y-1.5 text-xs sm:text-sm">
+                    {(preview.input.meta as any).productName && (
+                      <p><span className="text-text-muted">产品名称：</span>{String((preview.input.meta as any).productName)}</p>
+                    )}
+                    {(preview.input.meta as any).visionName && (
+                      <p><span className="text-text-muted">AI 识别：</span>{String((preview.input.meta as any).visionName)}</p>
+                    )}
+                    {(preview.input.meta as any).category && (
+                      <p><span className="text-text-muted">品类：</span>{String((preview.input.meta as any).category)}</p>
+                    )}
+                    {(preview.input.meta as any).description && (
+                      <p><span className="text-text-muted">描述：</span>{String((preview.input.meta as any).description)}</p>
+                    )}
+                    {(() => {
+                      const m = preview.input.meta as any;
+                      const specs = [
+                        m.topLength && `上装长度：${m.topLength}`,
+                        m.topFit && `上装版型：${m.topFit}`,
+                        m.bottomLength && `下装长度：${m.bottomLength}`,
+                        m.bottomFit && `下装版型：${m.bottomFit}`,
+                      ].filter(Boolean);
+                      return specs.length > 0 ? (
+                        <p><span className="text-text-muted">款式要求：</span>{specs.join(" · ")}</p>
+                      ) : null;
+                    })()}
+                    {(preview.input.meta as any).customerName && (
+                      <p><span className="text-text-muted">客户：</span>{String((preview.input.meta as any).customerName)}</p>
+                    )}
+                    {(preview.input.meta as any).createdAt && (
+                      <p className="text-[10px] text-meta">创建于 {new Date(String((preview.input.meta as any).createdAt)).toLocaleString("zh-CN")}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
