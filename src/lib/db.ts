@@ -147,6 +147,17 @@ export function initSchema() {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_ledger_user ON credit_ledger(user_id, created_at);
+
+    -- 分销绑定：客户 → 代理（单层）
+    CREATE TABLE IF NOT EXISTS referrals (
+      user_id    TEXT PRIMARY KEY,            -- 被绑定的客户
+      agent_id   TEXT NOT NULL,               -- 代理
+      source     TEXT NOT NULL DEFAULT 'manual',  -- qr=扫码 / manual=管理员手动
+      note       TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_referrals_agent ON referrals(agent_id);
   `);
 }
 
@@ -177,6 +188,8 @@ function ensureUserColumns() {
       { col: "daily_limit", ddl: `ALTER TABLE users ADD COLUMN daily_limit INTEGER` },
       { col: "monthly_limit", ddl: `ALTER TABLE users ADD COLUMN monthly_limit INTEGER` },
       { col: "credits", ddl: `ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 20` },
+      { col: "is_agent", ddl: `ALTER TABLE users ADD COLUMN is_agent INTEGER NOT NULL DEFAULT 0` },
+      { col: "agent_code", ddl: `ALTER TABLE users ADD COLUMN agent_code TEXT` },
     ];
     for (const { col, ddl } of adds) {
       if (!names.has(col)) db.exec(ddl);

@@ -59,7 +59,16 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [settings, setSettings] = useState<SettingItem[]>([]);
-  const [tab, setTab] = useState<"users" | "audit" | "settings">("users");
+  const [tab, setTab] = useState<"users" | "audit" | "settings" | "affiliate">("users");
+
+  // 分销管理
+  const [agents, setAgents] = useState<{
+    id: string; name: string; email: string | null; code: string;
+    clientCount: number; totalConsumed: number; estimatedEarning: number;
+  }[]>([]);
+  const [unboundUsers, setUnboundUsers] = useState<{ id: string; name: string }[]>([]);
+  const [affiliateLoaded, setAffiliateLoaded] = useState(false);
+  const [bindSel, setBindSel] = useState<Record<string, string>>({}); // userId → 选中 agentId
 
   // 新建用户表单
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "user" as "admin" | "user" });
@@ -200,6 +209,73 @@ export default function AdminPage() {
     await patchUser(u.id, { creditsAdjust: Math.trunc(delta) });
   };
 
+  // ---- 分销管理 ----
+  const loadAffiliate = async () => {
+    try {
+      const res = await apiFetch("/api/admin/affiliate");
+      if (!res.ok) return;
+      const d = await res.json();
+      setAgents(d.agents || []);
+      setUnboundUsers(d.unbound || []);
+      setAffiliateLoaded(true);
+    } catch {}
+  };
+  // 切到分销 tab 时加载一次
+  useEffect(() => {
+    if (tab === "affiliate" && !affiliateLoaded) loadAffiliate();
+  }, [tab, affiliateLoaded]);
+
+  const markAgent = async (u: { id: string; name: string }, isAgent: boolean) => {
+    setMsg(null);
+    if (!isAgent && !window.confirm(`取消 ${u.name} 的代理身份？其名下绑定关系保留但不再计入收益。`)) return;
+    try {
+      const res = await apiFetch("/api/admin/affiliate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "markAgent", userId: u.id, isAgent }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setMsg({ type: "err", text: d.error || "操作失败" }); return; }
+      setMsg({ type: "ok", text: d.agentCode ? `${u.name} 已是代理，专属码 ${d.agentCode}` : "已更新" });
+      setAffiliateLoaded(false); // 强制刷新
+      load();
+    } catch { setMsg({ type: "err", text: "网络错误" }); }
+  };
+
+  // 标记某普通用户为代理（从用户管理视角）
+  const promoteToAgent = async (u: AdminUser) => {
+    try {
+      const res = await apiFetch("/api/admin/affiliate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "markAgent", userId: u.id, isAgent: true }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setMsg({ type: "err", text: d.error || "操作失败" }); return; }
+      setMsg({ type: "ok", text: `${u.name} 已设为代理，专属码 ${d.agentCode}` });
+      setAffiliateLoaded(false);
+      load();
+    } catch { setMsg({ type: "err", text: "网络错误" }); }
+  };
+
+  const bindClient = async (userId: string) => {
+    const agentId = bindSel[userId];
+    if (!agentId) { setMsg({ type: "err", text: "请选择代理" }); return; }
+    setMsg(null);
+    try {
+      const res = await apiFetch("/api/admin/affiliate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bind", userId, agentId }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setMsg({ type: "err", text: d.error || "操作失败" }); return; }
+      setMsg({ type: "ok", text: "绑定成功" });
+      setAffiliateLoaded(false);
+      load();
+    } catch { setMsg({ type: "err", text: "网络错误" }); }
+  };
+
   // 系统设置保存（批量 PUT，仅可编辑项）
   const saveSettings = async () => {
     setMsg(null);
@@ -288,17 +364,17 @@ export default function AdminPage() {
 
         {/* Tab */}
         <div className="flex gap-2">
-          {(["users", "settings", "audit"] as const).map((t) => (
+          {(["users", "settings", "audit", "affiliate"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${tab === t ? "bg-accent text-accent-on border-accent" : "bg-white text-muted border-border"}`}>
-              {t === "users" ? "用户管理" : t === "settings" ? "系统设置" : "审计日志"}
+              {t === "users" ? "用户管理" : t === "settings" ? "系统设置" : t === "affiliate" ? "分销管理" : "审计日志"}
             </button>
           ))}
         </div>
 
         {tab === "settings" && (
           <div className="space-y-6">
-            {(["quota", "concurrency", "agent", "upload", "auth", "system"] as const).map((group) => {
+            {(["quota", "credits", "concurrency", "agent", "upload", "auth", "system"] as const).map((group) => {
               const items = settings.filter((s) => s.group === group);
               if (items.length === 0) return null;
               return (
@@ -406,6 +482,8 @@ export default function AdminPage() {
                         <div className="flex gap-2 text-xs">
                           {u.role !== "admin" && (
                             <>
+                              <button onClick={() => promoteToAgent(u)}
+                                className="text-green-600 hover:text-green-800">设为代理</button>
                               <button onClick={() => patchUser(u.id, { disabled: !u.disabled })}
                                 className="text-amber-600 hover:text-amber-800">{u.disabled ? "启用" : "禁用"}</button>
                               <button onClick={() => patchUser(u.id, { role: u.role === "admin" ? "user" : "admin" })}
@@ -449,6 +527,84 @@ export default function AdminPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {tab === "affiliate" && (
+          <div className="space-y-6">
+            {/* 代理列表 */}
+            <div className="bg-white rounded-xl border border-border overflow-hidden">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h2 className="font-semibold text-sm">代理列表（{agents.length}）</h2>
+                <p className="text-xs text-text-muted">收益 = 名下客户消耗 × 分成比例（积分记账，不结算）</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-left text-xs text-text-muted">
+                    <tr>
+                      <th className="px-4 py-2">代理</th>
+                      <th className="px-4 py-2">专属码</th>
+                      <th className="px-4 py-2">客户数</th>
+                      <th className="px-4 py-2">客户累计消耗</th>
+                      <th className="px-4 py-2">预估收益</th>
+                      <th className="px-4 py-2">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {agents.map((a) => (
+                      <tr key={a.id}>
+                        <td className="px-4 py-2">
+                          <div className="font-medium">{a.name}</div>
+                          <div className="text-xs text-text-muted">{a.email || a.id}</div>
+                        </td>
+                        <td className="px-4 py-2 font-mono text-xs bg-gray-50 rounded">{a.code}</td>
+                        <td className="px-4 py-2">{a.clientCount}</td>
+                        <td className="px-4 py-2">{a.totalConsumed} 分</td>
+                        <td className="px-4 py-2 font-semibold text-brand">{a.estimatedEarning} 分</td>
+                        <td className="px-4 py-2">
+                          <button onClick={() => markAgent({ id: a.id, name: a.name }, false)}
+                            className="text-amber-600 hover:text-amber-800 text-xs">取消代理</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {agents.length === 0 && (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">还没有代理。在"用户管理"中把某用户设为代理。</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 手动绑定客户 → 代理 */}
+            <div className="bg-white rounded-xl border border-border overflow-hidden">
+              <div className="px-4 py-3 border-b border-border">
+                <h2 className="font-semibold text-sm">手动绑定客户</h2>
+                <p className="text-xs text-text-muted mt-0.5">把未绑定的普通用户绑定给某个代理（客户消耗积分时计入该代理收益）</p>
+              </div>
+              {unboundUsers.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-muted text-center">没有未绑定的普通用户</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {unboundUsers.map((u) => (
+                    <div key={u.id} className="px-4 py-2.5 flex items-center gap-3">
+                      <span className="flex-1 text-sm truncate">{u.name}</span>
+                      <select
+                        value={bindSel[u.id] || ""}
+                        onChange={(e) => setBindSel((p) => ({ ...p, [u.id]: e.target.value }))}
+                        className="text-xs border border-border rounded-lg px-2 py-1 bg-white"
+                      >
+                        <option value="">选择代理…</option>
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}（{a.code}）</option>
+                        ))}
+                      </select>
+                      <button onClick={() => bindClient(u.id)}
+                        className="px-2.5 py-1 text-xs bg-brand text-white rounded hover:bg-brand-hover">绑定</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>

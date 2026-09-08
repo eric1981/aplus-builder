@@ -33,6 +33,7 @@ export const SETTING_DEFS: SettingDef[] = [
   { key: "creditCostSingle", label: "单图生成消耗积分", group: "credits", type: "number", default: 1, unit: "分/次" },
   { key: "creditCostStyleExtract", label: "模板复刻消耗积分", group: "credits", type: "number", default: 1, unit: "分/次" },
   { key: "newUserCredits", label: "新用户初始积分", group: "credits", type: "number", default: 20, unit: "分", description: "注册/创建用户时发放的初始积分" },
+  { key: "agentCommissionPercent", label: "代理分成比例", group: "credits", type: "number", default: 10, unit: "%", description: "代理从其名下客户消耗积分中分成的百分比（暂为记账，不结算）" },
   // 并发与队列
   { key: "maxConcurrent", label: "生图 Agent 并发数", group: "concurrency", type: "number", env: "MAX_CONCURRENT", default: 2, unit: "个" },
   { key: "maxQueue", label: "生成任务排队上限", group: "concurrency", type: "number", env: "MAX_QUEUE", default: 20, unit: "个", description: "队列满返回 429" },

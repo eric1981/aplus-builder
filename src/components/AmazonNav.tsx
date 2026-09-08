@@ -30,6 +30,9 @@ export default function AmazonNav() {
           <Link href="/output" className="whitespace-nowrap hover:text-[var(--accent)]">产出</Link>
           <Link href="/customers" className="whitespace-nowrap hover:text-[var(--accent)]">客户</Link>
           <Link href="/style-extract" className="whitespace-nowrap hover:text-[var(--accent)]">风格复刻</Link>
+          {user && (
+            <Link href="/affiliate" className="whitespace-nowrap hover:text-[var(--accent)]">分销</Link>
+          )}
           {user?.role === "admin" && (
             <Link href="/admin" className="whitespace-nowrap hover:text-[var(--accent)]">管理后台</Link>
           )}
