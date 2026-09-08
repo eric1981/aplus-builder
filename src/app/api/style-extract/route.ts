@@ -47,17 +47,56 @@ export async function POST(request: NextRequest) {
     const screenshot = formData.get("screenshot") as Blob | null;
     const requirements = (formData.get("requirements") as string) || "";
     const customerId = (formData.get("customer_id") as string) || "";
+    const mode = (formData.get("mode") as string) || "basic";
 
-    if (!screenshot || typeof screenshot !== "object" || !("arrayBuffer" in screenshot)) {
+    // 高级复刻：多张参考图 + 每张指定参考元素
+    // 收集 ref_{i}（图文件）与 ref_role_{i} / ref_note_{i}
+    const advancedRefs: { file: Blob | null; role: string; note: string }[] = [];
+    for (let i = 0; i < 8; i++) {
+      const f = formData.get(`ref_${i}`) as Blob | null;
+      if (f && typeof f === "object" && "arrayBuffer" in f) {
+        advancedRefs.push({
+          file: f,
+          role: (formData.get(`ref_role_${i}`) as string) || "整体风格",
+          note: (formData.get(`ref_note_${i}`) as string) || "",
+        });
+      }
+    }
+
+    // 基础模式必须有一张 screenshot；高级模式用 advancedRefs
+    const hasBasic = screenshot && typeof screenshot === "object" && "arrayBuffer" in screenshot;
+    if (mode === "advanced" ? advancedRefs.length === 0 : !hasBasic) {
       return NextResponse.json({ error: "请上传参考截图" }, { status: 400 });
     }
-
-    // 校验截图：大小限制 + magic bytes（customerId 传参不再直接拼路径，见下方 getCustomer）
-    const validated = await validateImageBlob(screenshot);
-    if (!validated) {
-      return NextResponse.json({ error: "截图无效：仅支持 PNG/JPEG/WebP 图片，且不超过 15MB" }, { status: 400 });
+    if (advancedRefs.length > 8) {
+      return NextResponse.json({ error: "高级复刻最多 8 张参考图" }, { status: 400 });
     }
-    const { buffer, ext } = validated;
+
+    // 校验并保存所有截图（basic: screenshot 1 张 / advanced: N 张）
+    const savedRefs: { path: string; role: string; note: string }[] = [];
+    const saveOne = async (blob: Blob, tag: string): Promise<{ path: string; ext: string }> => {
+      const validated = await validateImageBlob(blob);
+      if (!validated) throw new Error("截图无效：仅支持 PNG/JPEG/WebP 图片，且不超过 15MB");
+      const { buffer, ext } = validated;
+      const p = join(TEMPLATES_DIR, `${taskId}_${tag}.${ext}`);
+      writeFileSync(p, buffer);
+      return { path: p, ext };
+    };
+    try {
+      if (mode === "advanced") {
+        for (let i = 0; i < advancedRefs.length; i++) {
+          const r = advancedRefs[i];
+          if (!r.file) continue;
+          const saved = await saveOne(r.file, `ref${i}`);
+          savedRefs.push({ path: saved.path, role: r.role, note: r.note });
+        }
+      } else {
+        const saved = await saveOne(screenshot as Blob, "ref");
+        savedRefs.push({ path: saved.path, role: "整体风格", note: "" });
+      }
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message || "截图无效" }, { status: 400 });
+    }
 
     // 稳定性 P0：配额（日/月成本熔断）——校验通过后才消耗
     const quota = consumeQuota(userId);
@@ -76,11 +115,8 @@ export async function POST(request: NextRequest) {
     }
     console.log(`[credits] ${userId} 消耗 ${creditCost} 分（style_extract），余额 ${credit.balance}`);
 
-    // 保存截图
+    // 保存目录确保存在
     mkdirSync(TEMPLATES_DIR, { recursive: true });
-    const screenshotPath = join(TEMPLATES_DIR, `${taskId}_ref.${ext}`);
-    writeFileSync(screenshotPath, buffer);
-
     const outputPath = join(TEMPLATES_DIR, `${taskId}.html`);
 
     // 客户信息（经 customer-store 安全读取，杜绝路径穿越）
@@ -96,17 +132,49 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 拼 prompt
+    // 参考图角色 → 元素说明（对齐 aplus-style-creator 的映射维度）
+    const ROLE_HINTS: Record<string, string> = {
+      "整体风格": "整页设计语言（配色+字体+排版+模块结构的综合观感）",
+      "配色": "色彩系统：背景/文字/强调色/边框色的取色",
+      "字体": "字体系统：标题/正文的字体、字重、字号层级",
+      "排版与布局": "布局结构：模块顺序、分栏、图文方向、栅格",
+      "模块结构": "模块组成：用哪些模块、每模块的内容组织方式",
+      "图片处理手法": "图片特征：形状裁切、边框、阴影、蒙层、同网格形状变化",
+      "间距与圆角": "间距 padding/gap 与圆角风格",
+      "特殊元素": "特殊细节：图标、角标、装饰线、背景纹理等元素",
+    };
+
+    // 拼 prompt（单图 / 多图高级复刻）
+    const isMulti = savedRefs.length > 1;
+    const promptHead = isMulti
+      ? `这是「高级复刻」：请分析下面 ${savedRefs.length} 张参考图，每张图有指定的参考职责（元素分工），综合它们创建一个新的 A+ 风格模板。`
+      : `请分析这张参考截图，复刻其设计风格并创建一个新的 A+ 风格模板。`;
+
+    const refLines: string[] = [];
+    savedRefs.forEach((r, i) => {
+      const roleDesc = ROLE_HINTS[r.role] || r.role;
+      const noteLine = r.note ? `（补充说明：${r.note}）` : "";
+      refLines.push(`图${i + 1}（${r.role}）：${r.path} — 本图负责参考「${roleDesc}」${noteLine}`);
+    });
+
     const prompt = [
-      `请分析这张参考截图，复刻其设计风格并创建一个新的 A+ 风格模板。`,
+      promptHead,
       ``,
-      `参考截图：${screenshotPath}`,
+      ...refLines,
       ``,
       ...(requirements ? [`用户要求：${requirements}`] : []),
       ...(customerHint ? [customerHint] : []),
       ``,
+      ...(isMulti
+        ? [
+            `【映射规则】`,
+            `- 每张图只贡献它被指定的部分（如上图所述），不要拿图 A 的配色套用到只负责排版的图 B 上。`,
+            `- 若多个维度来自不同图且冲突，按用户指定优先；未指定的维度从参考图中合理推断。`,
+            `- 最终模板是这些元素的一个和谐整体，不是逐张拼贴。`,
+          ]
+        : []),
       `请完成以下操作：`,
-      `1. 视觉反推：分析截图的配色、字体、间距、排版、模块结构`,
+      `1. 视觉反推：按上述分工分析参考图（多图时逐图分析其负责维度）`,
       `2. 创建风格模板：构建完整可复用的 HTML/CSS 模板`,
       `3. 用刚刚创建的风格模板生成一个完整的 HTML 文件，需要的示例图片从 ${OUTPUT_BASE} 目录获取`,
       `4. 将 HTML 文件保存到：${outputPath}`,
