@@ -150,6 +150,10 @@ export default function BuildPage() {
   const [customers, setCustomers] = useState<CustomerInfo[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
 
+  // 复刻风格模板（本人 + admin 可见，build 可直接选用）
+  const [templates, setTemplates] = useState<{ id: string; thumb: string | null; ownerId: string }[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backFileRef = useRef<HTMLInputElement>(null);
   const modelFileRef = useRef<HTMLInputElement>(null);
@@ -192,6 +196,14 @@ export default function BuildPage() {
       .catch(() => {});
   }, []);
 
+  // 加载可见的风格模板
+  useEffect(() => {
+    apiFetch("/api/style-extract/templates")
+      .then((r) => r.json())
+      .then((d) => { if (d && Array.isArray(d.templates)) setTemplates(d.templates); })
+      .catch(() => {});
+  }, []);
+
   // -- 未登录（远程访问无会话）重定向到登录页；localhost 恒为 admin，不会触发 --
   useEffect(() => {
     apiFetch("/api/auth/me").then((r) => {
@@ -218,6 +230,10 @@ export default function BuildPage() {
         style: (c.defaultStyle as BuiltinStyle) || p.style,
         model: (c.defaultModel as ModelPref) || p.model,
       }));
+    }
+    // 客户绑定了定制模板且用户没直接选 → 自动选用
+    if (c.customTemplateId && !selectedTemplateId) {
+      setSelectedTemplateId(c.customTemplateId);
     }
   }, [selectedCustomerId, customers]);
 
@@ -308,9 +324,12 @@ export default function BuildPage() {
           formData.append("customer_name", cust.name);
           if (cust.sizeChartCsv) formData.append("customer_size_chart", cust.sizeChartCsv);
           if (cust.requirements) formData.append("customer_requirements", cust.requirements);
-          if (cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
+          // 客户绑定的模板：仅当用户没直接选模板时使用
+          if (!selectedTemplateId && cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
         }
       }
+      // 用户直接选择的复刻模板（优先于客户绑定）
+      if (selectedTemplateId) formData.append("custom_template_id", selectedTemplateId);
 
       const profile = loadProfile();
       if (profile.stats.total > 0) {
@@ -595,12 +614,54 @@ export default function BuildPage() {
           </button>
           {showPrefs && (
             <div className="mt-4 space-y-5 p-5 bg-gray-50 rounded-xl">
+              {/* 定制模板（复刻产出，直接选用） */}
+              {templates.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">定制模板 <span className="text-[10px] text-muted font-normal">（复刻的风格模板，选中后覆盖排版风格）</span></label>
+                  <p className="text-[10px] text-text-muted mb-2">在"产出中心 → 风格模板"可预览和管理模板。</p>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {templates.map((t) => (
+                      <button key={t.id}
+                        onClick={() => {
+                          const next = selectedTemplateId === t.id ? "" : t.id;
+                          setSelectedTemplateId(next);
+                          // 选模板：清空内置风格选择（模板本身是完整视觉系统）；取消则恢复 auto
+                          if (next) setPrefs({ ...prefs, style: "auto", odStyle: "" });
+                          else setPrefs((p) => ({ ...p, style: "auto" }));
+                        }}
+                        className={`relative shrink-0 w-20 h-24 rounded-lg overflow-hidden border-2 transition-all ${
+                          selectedTemplateId === t.id ? "border-brand ring-2 ring-brand/20" : "border-border hover:border-gray-300"
+                        }`}
+                        title={t.id}
+                      >
+                        {t.thumb ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={t.thumb} alt="模板" className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <span className="w-full h-full flex items-center justify-center text-xl text-gray-300">🎨</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 已选择定制模板提示（对应"偏好设置-排版风格"提示） */}
+                  {selectedTemplateId && (
+                    <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-brand/10 border border-brand/30 text-brand text-xs font-medium">
+                      <span>✅</span>
+                      <span className="flex-1">已选择定制模板（排版风格将使用此模板，内置风格不再生效）</span>
+                      <button onClick={() => { setSelectedTemplateId(""); setPrefs((p) => ({ ...p, style: "auto" })); }}
+                        className="text-[11px] underline hover:text-brand-active">取消</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium mb-3">排版风格</label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                   {STYLE_OPTIONS.map((opt) => (
                     <button key={opt.value}
-                      onClick={() => setPrefs({ ...prefs, style: opt.value, odStyle: "" })}
+                      onClick={() => { setPrefs({ ...prefs, style: opt.value, odStyle: "" }); setSelectedTemplateId(""); }}
                       className={`relative p-3 rounded-xl text-left transition-all ${
                         prefs.style === opt.value && !prefs.odStyle ? "ring-2 ring-brand ring-offset-1" : "hover:ring-1 hover:ring-gray-300"
                       } ${opt.className}`}>
@@ -621,7 +682,7 @@ export default function BuildPage() {
                           <div className="flex flex-wrap gap-1">
                             {OD_STYLES.filter(od => od.category === cat).map((od) => (
                               <button key={od.value}
-                                onClick={() => setPrefs({ ...prefs, odStyle: prefs.odStyle === od.value ? "" : od.value, style: prefs.odStyle === od.value ? prefs.style : "auto" })}
+                                onClick={() => { setPrefs({ ...prefs, odStyle: prefs.odStyle === od.value ? "" : od.value, style: prefs.odStyle === od.value ? prefs.style : "auto" }); setSelectedTemplateId(""); }}
                                 className={`px-2 py-0.5 rounded text-[10px] transition-all ${
                                   prefs.odStyle === od.value ? "bg-accent text-accent-on font-medium" : "bg-surface border border-border text-muted hover:border-accent/30 hover:text-fg"
                                 }`}>{od.label}</button>

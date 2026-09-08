@@ -249,7 +249,9 @@ export default function CustomersPage() {
                     className="w-full px-3 py-2 border border-border rounded-lg text-sm">
                     <option value="">不使用自定义模板</option>
                     {templates.map(t => (
-                      <option key={t.id} value={t.id}>{t.filename}</option>
+                      <option key={t.id} value={t.id}>
+                        {(t as any).ownerId === "admin" ? "平台模板" : "我的模板"} · {new Date((t as any).createdAt || Date.now()).toLocaleDateString("zh-CN")}
+                      </option>
                     ))}
                   </select>
                 ) : (

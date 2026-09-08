@@ -7,6 +7,7 @@ import { getCustomer } from "@/lib/customer-store";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
 import { consumeCredits, creditCostFor } from "@/lib/credits";
+import { onTemplateCreated, migrateLegacyTemplates } from "@/lib/style-templates";
 import { getAgentHome, getStyleTimeoutMs, OUTPUT_BASE } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
@@ -224,6 +225,10 @@ export async function POST(request: NextRequest) {
       activeStyleCount = Math.max(0, activeStyleCount - 1);
       tasks.set(taskId, { status, templateId: taskId, html, error: errMsg, log: logBuffer.slice(-5000) });
       logAudit(userId, status === "done" ? "style.done" : "style.error", { taskId, error: errMsg });
+      // 复刻成功：注册模板（归属当前用户）+ 后台生成缩略图
+      if (status === "done") {
+        onTemplateCreated(taskId, userId).catch(() => {});
+      }
     };
 
     const timer = setTimeout(() => {
@@ -267,3 +272,9 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json(task);
 }
+
+// 模块加载时迁移一次旧模板（customer-templates/*.html → style_templates，归 admin）
+try {
+  const n = migrateLegacyTemplates();
+  if (n > 0) console.log(`[style-templates] 迁移 ${n} 个旧模板`);
+} catch {}

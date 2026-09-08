@@ -158,6 +158,17 @@ export function initSchema() {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_referrals_agent ON referrals(agent_id);
+
+    -- 复刻风格模板元数据（customer-templates/*.html）
+    -- id = 模板文件名（不含 .html，复刻模板为 taskId，手工模板为原名）
+    CREATE TABLE IF NOT EXISTS style_templates (
+      id           TEXT PRIMARY KEY,
+      owner_id     TEXT NOT NULL,             -- 谁复刻的（手工模板归 admin）
+      filename     TEXT NOT NULL,             -- 实际文件名 xxx.html
+      thumb        TEXT,                      -- 缩略图相对路径（public 下或磁盘）
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_style_tpl_owner ON style_templates(owner_id);
   `);
 }
 

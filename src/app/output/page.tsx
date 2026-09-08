@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { getHistory, loadOutput, outputImageUrl, type HistoryEntry, type LoadedOutput } from "../../lib/history";
+import TemplateGallery from "../../components/TemplateGallery";
 import { apiFetch } from "../../lib/apiFetch";
 
 const STORAGE_KEY = "aplus-builder-state";
@@ -975,6 +976,9 @@ export default function OutputPage() {
             )}
           </div>
         )}
+
+        {/* ===== 风格模板（复刻产出，本人 + admin）===== */}
+        <TemplateGallery />
 
         {/* 空状态 */}
         {!hasContent && hydrated && (
