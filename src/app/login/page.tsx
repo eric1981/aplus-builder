@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/apiFetch";
+import { refreshAuth } from "../../lib/auth-client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,7 +31,8 @@ export default function LoginPage() {
         setError(data.error || "登录失败");
         return;
       }
-      // 登录成功：回到来源页（管理员的 admin 后台，普通用户回产出中心）
+      // 登录成功：刷新全局 auth（导航栏/积分立即更新）并跳转
+      refreshAuth();
       router.replace(data.user?.role === "admin" ? "/admin" : "/output");
       router.refresh();
     } catch {
