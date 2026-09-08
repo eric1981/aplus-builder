@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "../../lib/apiFetch";
@@ -69,10 +69,15 @@ export default function AdminPage() {
   const [agents, setAgents] = useState<{
     id: string; name: string; email: string | null; code: string;
     clientCount: number; totalConsumed: number; estimatedEarning: number;
+    clients: {
+      userId: string; userName: string; email: string | null; source: string;
+      boundAt: number; consumed: number; currentBalance: number;
+    }[];
   }[]>([]);
   const [unboundUsers, setUnboundUsers] = useState<{ id: string; name: string }[]>([]);
   const [affiliateLoaded, setAffiliateLoaded] = useState(false);
   const [bindSel, setBindSel] = useState<Record<string, string>>({}); // userId → 选中 agentId
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null); // 展开查看客户明细
 
   // 新建用户表单
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "user" as "admin" | "user" });
@@ -275,6 +280,24 @@ export default function AdminPage() {
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { setMsg({ type: "err", text: d.error || "操作失败" }); return; }
       setMsg({ type: "ok", text: "绑定成功" });
+      setAffiliateLoaded(false);
+      load();
+    } catch { setMsg({ type: "err", text: "网络错误" }); }
+  };
+
+  // 解绑：把客户从其代理名下移除（agentId 传 null → setReferral DELETE）
+  const unbindClient = async (userId: string, userName: string) => {
+    if (!window.confirm(`解绑 ${userName} 的代理关系？解绑后该客户消耗不再计入原代理收益。`)) return;
+    setMsg(null);
+    try {
+      const res = await apiFetch("/api/admin/affiliate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bind", userId, agentId: null }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setMsg({ type: "err", text: d.error || "操作失败" }); return; }
+      setMsg({ type: "ok", text: "已解绑" });
       setAffiliateLoaded(false);
       load();
     } catch { setMsg({ type: "err", text: "网络错误" }); }
@@ -567,7 +590,8 @@ export default function AdminPage() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {agents.map((a) => (
-                      <tr key={a.id}>
+                      <Fragment key={a.id}>
+                      <tr>
                         <td className="px-4 py-2">
                           <div className="font-medium">{a.name}</div>
                           <div className="text-xs text-text-muted">{a.email || a.id}</div>
@@ -577,10 +601,41 @@ export default function AdminPage() {
                         <td className="px-4 py-2">{a.totalConsumed} 分</td>
                         <td className="px-4 py-2 font-semibold text-brand">{a.estimatedEarning} 分</td>
                         <td className="px-4 py-2">
-                          <button onClick={() => markAgent({ id: a.id, name: a.name }, false)}
-                            className="text-amber-600 hover:text-amber-800 text-xs">取消代理</button>
+                          <div className="flex gap-2 text-xs">
+                            <button onClick={() => setExpandedAgent(expandedAgent === a.id ? null : a.id)}
+                              className="text-blue-600 hover:text-blue-800">
+                              {expandedAgent === a.id ? "收起客户" : `客户（${a.clientCount}）`}
+                            </button>
+                            <button onClick={() => markAgent({ id: a.id, name: a.name }, false)}
+                              className="text-amber-600 hover:text-amber-800">取消代理</button>
+                          </div>
                         </td>
                       </tr>
+                      {expandedAgent === a.id && (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-2 bg-gray-50/50">
+                            {a.clients && a.clients.length > 0 ? (
+                              <div className="divide-y divide-border/60">
+                                {a.clients.map((c) => (
+                                  <div key={c.userId} className="py-2 flex items-center gap-3">
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-sm font-medium">{c.userName}</span>
+                                      <span className="text-xs text-text-muted ml-2">{c.email || c.userId}</span>
+                                      <span className="text-xs text-text-muted ml-2">{c.source === "qr" ? "扫码" : "手动"}绑定</span>
+                                    </div>
+                                    <span className="text-xs text-text-muted">消耗 {c.consumed} 分 · 余额 {c.currentBalance}</span>
+                                    <button onClick={() => unbindClient(c.userId, c.userName)}
+                                      className="text-xs text-red-500 hover:text-red-700">解绑</button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="py-2 text-xs text-muted">该代理名下暂无客户</p>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                     {agents.length === 0 && (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">还没有代理。在"用户管理"中把某用户设为代理。</td></tr>

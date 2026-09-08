@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
 
   const agents = listAgents().map((a) => {
     const s = agentSummary(a.id);
-    return { ...a, clientCount: s.clientCount, totalConsumed: s.totalConsumed, estimatedEarning: s.estimatedEarning };
+    return { ...a, clientCount: s.clientCount, totalConsumed: s.totalConsumed, estimatedEarning: s.estimatedEarning, clients: s.clients };
   });
   return NextResponse.json({ agents, unbound: listUnboundUsers() });
 }
