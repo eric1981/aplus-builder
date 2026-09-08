@@ -146,6 +146,7 @@ export async function GET(req: NextRequest) {
         // meta 里记录的 key → 文件名映射；无 meta 时按文件名后缀猜测
         const known = [
           ["product", "productImage", "产品图"],
+          ["back", "backImage", "背面图"],
           ["model_ref", "modelImage", "模特参考"],
           ["logo", "logoImage", "Logo"],
         ] as const;

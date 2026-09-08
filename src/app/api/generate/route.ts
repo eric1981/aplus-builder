@@ -354,6 +354,7 @@ export async function POST(request: NextRequest) {
     }
 
     let imgPath = "";
+    let backImgPath = "";
     let modelRefPath = "";
     let logoPath = "";
 
@@ -446,6 +447,18 @@ export async function POST(request: NextRequest) {
       const { buffer, ext } = validated;
       imgPath = join(inputDir, `product.${ext}`);
       writeFileSync(imgPath, buffer);
+    }
+
+    // 背面图（可选）：与产品图同一款的背面，帮助还原背面细节
+    const backImage = formData.get("back_image_0");
+    if (backImage && typeof backImage === "object" && "arrayBuffer" in backImage) {
+      const validated = await validateImageBlob(backImage as Blob);
+      if (!validated) {
+        return NextResponse.json({ error: "背面图无效：仅支持 PNG/JPEG/WebP，且不超过 15MB" }, { status: 400 });
+      }
+      const { buffer, ext } = validated;
+      backImgPath = join(inputDir, `back.${ext}`);
+      writeFileSync(backImgPath, buffer);
     }
 
     if (!imgPath) {
@@ -543,6 +556,7 @@ export async function POST(request: NextRequest) {
         `帮我生成1张产品场景图。`,
         ``,
         `产品图：${imgPath}`,
+        ...(backImgPath ? [`背面图：${backImgPath}（这是同一款产品的背面照片，用于补充还原背面细节，与产品图是同一款）`] : []),
         ...(modelRefPath ? [`模特参考图：${modelRefPath}`] : []),
         descBlock,
         ...(prefLines.length > 0 ? [`偏好参考：`, ...prefLines, ``] : []),
@@ -567,6 +581,7 @@ export async function POST(request: NextRequest) {
         `帮我生成这个产品的电商详情页。`,
         ``,
         `产品图：${imgPath}`,
+        ...(backImgPath ? [`背面图：${backImgPath}（这是同一款产品的背面照片，用于补充还原背面细节，与产品图是同一款）`] : []),
         ...(modelRefPath ? [`模特参考图：${modelRefPath}`] : []),
         ...(logoPath ? [`品牌 Logo：${logoPath}（请将 Logo 嵌入详情页顶部品牌区或底部页脚，使用 <img src="./logo.png"> 引用，保持原始比例不拉伸变形）`] : []),
         descBlock,
@@ -626,6 +641,7 @@ export async function POST(request: NextRequest) {
         createdAt: new Date().toISOString(),
         // 上传的图片文件名（input/ 目录下）
         productImage: imgPath ? imgPath.split("/").pop() : undefined,
+        backImage: backImgPath ? backImgPath.split("/").pop() : undefined,
         modelImage: modelRefPath ? modelRefPath.split("/").pop() : undefined,
         logoImage: logoPath ? logoPath.split("/").pop() : undefined,
       };

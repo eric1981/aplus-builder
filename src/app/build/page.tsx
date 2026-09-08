@@ -27,6 +27,8 @@ interface QueueItem {
   id: string;
   image: string | null;
   imageFile: File | null;
+  backImage: string | null;
+  backImageFile: File | null;
   modelImage: string | null;
   modelImageFile: File | null;
   logoImage: string | null;
@@ -128,6 +130,9 @@ export default function BuildPage() {
   // -- 表单状态 --
   const [formImage, setFormImage] = useState<string | null>(null);
   const [formImageFile, setFormImageFile] = useState<File | null>(null);
+  // 背面图（可选）：与产品图同一款的背面
+  const [formBackImage, setFormBackImage] = useState<string | null>(null);
+  const [formBackImageFile, setFormBackImageFile] = useState<File | null>(null);
   const [formModelImage, setFormModelImage] = useState<string | null>(null);
   const [formModelImageFile, setFormModelImageFile] = useState<File | null>(null);
   const [formLogoImage, setFormLogoImage] = useState<string | null>(null);
@@ -157,6 +162,7 @@ export default function BuildPage() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backFileRef = useRef<HTMLInputElement>(null);
   const modelFileRef = useRef<HTMLInputElement>(null);
   const logoFileRef = useRef<HTMLInputElement>(null);
 
@@ -223,6 +229,14 @@ export default function BuildPage() {
     reader.readAsDataURL(file);
   }, []);
 
+  const handleBackImageUpload = useCallback((file: File | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setFormBackImageFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setFormBackImage(reader.result as string);
+    reader.readAsDataURL(file);
+  }, []);
+
   const handleModelImageUpload = useCallback((file: File | null) => {
     if (!file || !file.type.startsWith("image/")) return;
     setFormModelImageFile(file);
@@ -241,6 +255,7 @@ export default function BuildPage() {
 
   const resetForm = () => {
     setFormImage(null); setFormImageFile(null);
+    setFormBackImage(null); setFormBackImageFile(null);
     setFormModelImage(null); setFormModelImageFile(null);
     setFormLogoImage(null); setFormLogoImageFile(null);
     setFormDescription(""); setFormProductName(""); setFormCategory("");
@@ -255,6 +270,8 @@ export default function BuildPage() {
       id: newId(),
       image: formImage,
       imageFile: formImageFile,
+      backImage: formBackImage,
+      backImageFile: formBackImageFile,
       modelImage: formModelImage,
       modelImageFile: formModelImageFile,
       logoImage: formLogoImage,
@@ -270,6 +287,7 @@ export default function BuildPage() {
     try {
       const formData = new FormData();
       formData.append("image_0", item.imageFile!);
+      if (item.backImageFile) formData.append("back_image_0", item.backImageFile);
       if (item.modelImageFile) formData.append("model_image_0", item.modelImageFile);
       if (item.logoImageFile) formData.append("logo_image_0", item.logoImageFile);
       formData.append("description", item.description);
@@ -416,6 +434,26 @@ export default function BuildPage() {
               <p className="text-text-muted text-[10px] sm:text-xs mt-1">JPG / PNG / WebP</p>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
                 onChange={(e) => handleImageUpload(e.target.files?.[0] || null)} />
+            </div>
+          )}
+        </div>
+
+        {/* ===== 背面图（可选）===== */}
+        <div>
+          <h2 className="text-base sm:text-lg font-semibold mb-1">背面图 <span className="text-text-muted text-xs sm:text-sm font-normal ml-2">（可选）</span></h2>
+          <p className="text-text-muted text-xs sm:text-sm mb-4">上传同一款产品的背面照片，帮助 AI 更准确地还原背面细节。</p>
+          {formBackImage ? (
+            <div className="relative w-24 sm:w-32 aspect-[3/4] rounded-xl overflow-hidden bg-gray-100 shadow-sm">
+              <img src={formBackImage} alt="背面图" className="w-full h-full object-cover" />
+              <button onClick={() => { setFormBackImage(null); setFormBackImageFile(null); }} className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/60 text-white rounded-full flex items-center justify-center text-xs hover:bg-black/80 transition-colors">✕</button>
+            </div>
+          ) : (
+            <div onClick={() => backFileRef.current?.click()}
+              className="border-2 border-dashed border-border rounded-xl p-4 sm:p-6 text-center cursor-pointer hover:border-brand/30 transition-colors max-w-xs">
+              <div className="text-xl mb-1">🔙</div>
+              <p className="text-text-muted text-xs">点击上传背面图</p>
+              <input ref={backFileRef} type="file" accept="image/*" className="hidden"
+                onChange={(e) => handleBackImageUpload(e.target.files?.[0] || null)} />
             </div>
           )}
         </div>
