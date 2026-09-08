@@ -16,6 +16,7 @@ interface AdminUser {
   taskCount: number;
   dailyLimit: number | null;
   monthlyLimit: number | null;
+  credits: number;
   usage: { daily: number; monthly: number };
 }
 
@@ -184,6 +185,21 @@ export default function AdminPage() {
     });
   };
 
+  // 手动调整积分（正=发放 负=扣减）
+  const adjustCredits = async (u: AdminUser) => {
+    const input = window.prompt(
+      `调整 ${u.name} 的积分（当前 ${u.credits} 分）\n输入正数发放，负数扣减，如 50 或 -10：`,
+      "",
+    );
+    if (input === null || input.trim() === "") return;
+    const delta = Number(input.trim());
+    if (!Number.isFinite(delta) || delta === 0) {
+      setMsg({ type: "err", text: "请输入非零整数" });
+      return;
+    }
+    await patchUser(u.id, { creditsAdjust: Math.trunc(delta) });
+  };
+
   // 系统设置保存（批量 PUT，仅可编辑项）
   const saveSettings = async () => {
     setMsg(null);
@@ -214,6 +230,7 @@ export default function AdminPage() {
 
   const GROUP_LABELS: Record<string, string> = {
     quota: "配额",
+    credits: "积分（真实扣减）",
     concurrency: "并发与队列",
     agent: "Agent",
     upload: "上传",
@@ -359,6 +376,7 @@ export default function AdminPage() {
                     <th className="px-4 py-2">用户</th>
                     <th className="px-4 py-2">角色</th>
                     <th className="px-4 py-2">任务数</th>
+                    <th className="px-4 py-2">积分</th>
                     <th className="px-4 py-2">配额（日/月）</th>
                     <th className="px-4 py-2">状态</th>
                     <th className="px-4 py-2">创建时间</th>
@@ -374,6 +392,10 @@ export default function AdminPage() {
                       </td>
                       <td className="px-4 py-2">{u.role === "admin" ? "管理员" : "用户"}</td>
                       <td className="px-4 py-2">{u.taskCount}</td>
+                      <td className="px-4 py-2">
+                        <span className={`font-semibold ${u.credits <= 0 ? "text-red-500" : u.credits < 5 ? "text-orange-500" : ""}`}>{u.credits}</span>
+                        <button onClick={() => adjustCredits(u)} className="ml-2 text-blue-600 hover:text-blue-800">调整</button>
+                      </td>
                       <td className="px-4 py-2 text-xs">
                         <span className="text-text-muted">今 {u.usage.daily}/{u.dailyLimit ?? "∞"} · 月 {u.usage.monthly}/{u.monthlyLimit ?? "∞"}</span>
                         <button onClick={() => editUserQuota(u)} className="ml-2 text-blue-600 hover:text-blue-800">编辑</button>

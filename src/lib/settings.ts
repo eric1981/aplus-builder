@@ -13,7 +13,7 @@ import { registerSettingsGetter } from "@/lib/config";
 export interface SettingDef {
   key: string;
   label: string;
-  group: "quota" | "concurrency" | "agent" | "upload" | "system" | "auth";
+  group: "quota" | "concurrency" | "agent" | "upload" | "system" | "auth" | "credits";
   type: "number" | "boolean" | "select";
   options?: string[];
   env?: string;
@@ -28,6 +28,11 @@ export const SETTING_DEFS: SettingDef[] = [
   // 配额
   { key: "maxDailyTasks", label: "每日任务配额（全局）", group: "quota", type: "number", env: "MAX_DAILY_TASKS", default: 200, unit: "个/天" },
   { key: "maxMonthlyTasks", label: "每月任务配额（全局）", group: "quota", type: "number", env: "MAX_MONTHLY_TASKS", default: 2000, unit: "个/月" },
+  // 积分（真实扣减）
+  { key: "creditCostDetail", label: "全量生成消耗积分", group: "credits", type: "number", default: 1, unit: "分/次" },
+  { key: "creditCostSingle", label: "单图生成消耗积分", group: "credits", type: "number", default: 1, unit: "分/次" },
+  { key: "creditCostStyleExtract", label: "模板复刻消耗积分", group: "credits", type: "number", default: 1, unit: "分/次" },
+  { key: "newUserCredits", label: "新用户初始积分", group: "credits", type: "number", default: 20, unit: "分", description: "注册/创建用户时发放的初始积分" },
   // 并发与队列
   { key: "maxConcurrent", label: "生图 Agent 并发数", group: "concurrency", type: "number", env: "MAX_CONCURRENT", default: 2, unit: "个" },
   { key: "maxQueue", label: "生成任务排队上限", group: "concurrency", type: "number", env: "MAX_QUEUE", default: 20, unit: "个", description: "队列满返回 429" },

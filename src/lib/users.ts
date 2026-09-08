@@ -10,6 +10,7 @@
 import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
+import { getSettingInt } from "@/lib/settings";
 
 export interface User {
   id: string;
@@ -22,6 +23,8 @@ export interface User {
   /** 每用户配额（null = 不限，跟随全局） */
   dailyLimit?: number | null;
   monthlyLimit?: number | null;
+  /** 积分余额（真实扣减） */
+  credits: number;
   createdAt: string;
 }
 
@@ -35,6 +38,7 @@ function rowToUser(row: Record<string, unknown>): User {
     disabled: Boolean(Number(row.disabled || 0)),
     dailyLimit: row.daily_limit == null ? null : Number(row.daily_limit),
     monthlyLimit: row.monthly_limit == null ? null : Number(row.monthly_limit),
+    credits: Number(row.credits || 0),
     createdAt: String(row.created_at || ""),
   };
 }
@@ -100,9 +104,11 @@ export function createUserWithPassword(
   if (getUserById(id)) throw new Error(`用户 ID 已存在：${id}`);
 
   const now = new Date().toISOString();
+  // 初始积分：settings.newUserCredits 可配（默认 20），管理员可在后台调整
+  const initialCredits = Math.max(0, getSettingInt("newUserCredits", 20));
   db.prepare(
-    `INSERT INTO users (id, name, email, token, password_hash, role, disabled, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+    `INSERT INTO users (id, name, email, token, password_hash, role, disabled, credits, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
   ).run(
     id,
     name.trim(),
@@ -110,8 +116,16 @@ export function createUserWithPassword(
     randomBytes(16).toString("hex"),
     hashPassword(password),
     role,
+    initialCredits,
     now,
   );
+  // 初始积分流水（可审计）
+  try {
+    db.prepare(
+      `INSERT INTO credit_ledger (user_id, delta, reason, balance, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(id, initialCredits, "signup.bonus", initialCredits, Date.now());
+  } catch {}
   return getUserById(id)!;
 }
 

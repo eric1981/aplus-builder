@@ -70,6 +70,7 @@ export function initSchema() {
       disabled      INTEGER NOT NULL DEFAULT 0,
       daily_limit   INTEGER,
       monthly_limit INTEGER,
+      credits       INTEGER NOT NULL DEFAULT 20,
       created_at    TEXT NOT NULL
     );
 
@@ -135,6 +136,17 @@ export function initSchema() {
       month       TEXT NOT NULL,
       month_count INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS credit_ledger (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    TEXT NOT NULL,
+      delta      INTEGER NOT NULL,            -- 正=发放 负=消耗
+      reason     TEXT NOT NULL,               -- 如 'task.detail' / 'task.single' / 'style_extract' / 'admin.topup'
+      balance    INTEGER NOT NULL,            -- 变动后余额（快照，便于审计）
+      ref        TEXT,                        -- 关联（task_id / admin 备注）
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ledger_user ON credit_ledger(user_id, created_at);
   `);
 }
 
@@ -164,6 +176,7 @@ function ensureUserColumns() {
       { col: "disabled", ddl: `ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0` },
       { col: "daily_limit", ddl: `ALTER TABLE users ADD COLUMN daily_limit INTEGER` },
       { col: "monthly_limit", ddl: `ALTER TABLE users ADD COLUMN monthly_limit INTEGER` },
+      { col: "credits", ddl: `ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 20` },
     ];
     for (const { col, ddl } of adds) {
       if (!names.has(col)) db.exec(ddl);

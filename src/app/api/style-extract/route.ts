@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { getCustomer } from "@/lib/customer-store";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
+import { consumeCredits, creditCostFor } from "@/lib/credits";
 import { getAgentHome, getStyleTimeoutMs, OUTPUT_BASE } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
@@ -63,6 +64,17 @@ export async function POST(request: NextRequest) {
     if (!quota.ok) {
       return NextResponse.json({ error: quota.reason }, { status: 429 });
     }
+
+    // 积分真实扣减（模板复刻）
+    const creditCost = creditCostFor("style_extract");
+    const credit = consumeCredits(userId, creditCost, "style_extract", taskId);
+    if (!credit.ok) {
+      return NextResponse.json(
+        { error: `积分不足：本次需要 ${creditCost} 积分，当前余额 ${credit.balance}（请联系管理员充值）` },
+        { status: 402 },
+      );
+    }
+    console.log(`[credits] ${userId} 消耗 ${creditCost} 分（style_extract），余额 ${credit.balance}`);
 
     // 保存截图
     mkdirSync(TEMPLATES_DIR, { recursive: true });

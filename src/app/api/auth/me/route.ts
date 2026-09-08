@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserBySessionToken, SESSION_COOKIE, seedAdmin } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
+import { getCreditBalance } from "@/lib/credits";
 
 /**
  * GET /api/auth/me
- * 返回当前登录用户。身份来源（proxy 已注入 x-user-id）：
+ * 返回当前登录用户（含真实积分余额）。身份来源（proxy 已注入 x-user-id）：
  * - 会话 Cookie → 用户
  * - token / localhost admin → x-user-id
  */
@@ -15,7 +16,13 @@ export async function GET(request: NextRequest) {
   const sessionUser = getUserBySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (sessionUser) {
     return NextResponse.json({
-      user: { id: sessionUser.id, name: sessionUser.name, email: sessionUser.email, role: sessionUser.role },
+      user: {
+        id: sessionUser.id,
+        name: sessionUser.name,
+        email: sessionUser.email,
+        role: sessionUser.role,
+        credits: getCreditBalance(sessionUser.id),
+      },
     });
   }
 
@@ -25,12 +32,27 @@ export async function GET(request: NextRequest) {
     const u = getUserById(userId);
     if (u) {
       return NextResponse.json({
-        user: { id: u.id, name: u.name, email: u.email ?? null, role: u.role },
+        user: {
+          id: u.id,
+          name: u.name,
+          email: u.email ?? null,
+          role: u.role,
+          credits: getCreditBalance(u.id),
+        },
       });
     }
     // admin 是内置用户，不一定在库中（兜底）
     if (userId === "admin") {
-      return NextResponse.json({ user: { id: "admin", name: "管理员", email: null, role: "admin" } });
+      const adminRow = getUserById("admin");
+      return NextResponse.json({
+        user: {
+          id: "admin",
+          name: "管理员",
+          email: null,
+          role: "admin",
+          credits: adminRow ? getCreditBalance("admin") : 0,
+        },
+      });
     }
   }
 

@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin";
 import {
   getUserById, setUserDisabled, setUserRole, setUserQuota, resetUserPassword, deleteUser,
 } from "@/lib/users";
+import { addCredits, consumeCredits, getCreditBalance } from "@/lib/credits";
 import { logAudit } from "@/lib/audit";
 
 type Params = { params: Promise<{ id: string }> };
@@ -24,6 +25,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     password?: string;
     dailyLimit?: number | null;
     monthlyLimit?: number | null;
+    creditsAdjust?: number;
   };
   try {
     body = await request.json();
@@ -53,7 +55,21 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       setUserQuota(id, dl, ml);
       logAudit(admin.id, "admin.user_quota", { target: id, dailyLimit: dl, monthlyLimit: ml });
     }
-    return NextResponse.json({ ok: true });
+    // 积分调整：正=发放 负=扣减（真实写入余额 + 流水）
+    if (typeof body.creditsAdjust === "number" && body.creditsAdjust !== 0) {
+      const delta = Math.trunc(body.creditsAdjust);
+      if (delta > 0) {
+        addCredits(id, delta, "admin.topup", `by ${admin.id}`);
+        logAudit(admin.id, "admin.credit_topup", { target: id, amount: delta });
+      } else {
+        const r = consumeCredits(id, -delta, "admin.deduct", `by ${admin.id}`);
+        if (!r.ok) {
+          return NextResponse.json({ error: `扣减失败：余额不足（当前 ${r.balance}）` }, { status: 400 });
+        }
+        logAudit(admin.id, "admin.credit_deduct", { target: id, amount: -delta });
+      }
+    }
+    return NextResponse.json({ ok: true, credits: getCreditBalance(id) });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "操作失败" }, { status: 400 });
   }

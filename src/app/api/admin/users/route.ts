@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     taskCount: u.taskCount,
     dailyLimit: u.dailyLimit ?? null,
     monthlyLimit: u.monthlyLimit ?? null,
+    credits: u.credits,
     usage: getUserQuotaUsage(u.id),
   }));
   return NextResponse.json({ users });

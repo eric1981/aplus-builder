@@ -7,6 +7,7 @@ import { taskStore } from "./task-store";
 import { db } from "@/lib/db";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
+import { consumeCredits, creditCostFor } from "@/lib/credits";
 import { getAgentHome, getAgentTimeoutMs, userBase } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { screenshotPage } from "@/lib/screenshot";
@@ -672,6 +673,18 @@ export async function POST(request: NextRequest) {
     if (!quota.ok) {
       return NextResponse.json({ error: quota.reason }, { status: 429 });
     }
+
+    // 积分真实扣减（按模式取单价；失败则不创建任务）
+    const creditReason = mode === "single" ? "task.single" : "task.detail";
+    const creditCost = creditCostFor(creditReason);
+    const credit = consumeCredits(userId, creditCost, creditReason, taskId);
+    if (!credit.ok) {
+      return NextResponse.json(
+        { error: `积分不足：本次需要 ${creditCost} 积分，当前余额 ${credit.balance}（请联系管理员充值）` },
+        { status: 402 },
+      );
+    }
+    console.log(`[credits] ${userId} 消耗 ${creditCost} 分（${creditReason}），余额 ${credit.balance}`);
 
     // 持久化任务元数据
     taskStore.add({

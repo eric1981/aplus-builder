@@ -7,8 +7,6 @@ import { apiFetch } from "../../lib/apiFetch";
 import { STYLE_OPTIONS, OD_STYLES, MODEL_OPTIONS, type BuiltinStyle, type ModelPref } from "../../lib/preference-constants";
 
 const STORAGE_KEY = "aplus-builder-state";
-const CREDITS_KEY = "aplus-credits";
-const FREE_CREDITS = 999;
 
 // ===== 类型 =====
 
@@ -53,15 +51,6 @@ interface CustomerInfo {
 
 let _idCounter = 0;
 function newId(): string { return `p${Date.now()}_${_idCounter++}`; }
-
-// ===== 积分 =====
-
-function loadCredits(): number {
-  try { const raw = localStorage.getItem(CREDITS_KEY); return raw !== null ? parseInt(raw) : FREE_CREDITS; }
-  catch { return FREE_CREDITS; }
-}
-function saveCredits(n: number) { localStorage.setItem(CREDITS_KEY, String(n)); }
-function useCredit(): number { const c = Math.max(0, loadCredits() - 1); saveCredits(c); return c; }
 
 // ===== 偏好画像 =====
 
@@ -166,6 +155,17 @@ export default function BuildPage() {
   const modelFileRef = useRef<HTMLInputElement>(null);
   const logoFileRef = useRef<HTMLInputElement>(null);
 
+  // 从后端读真实积分余额（扣减在服务端做，前端只展示）
+  const refreshCredits = async () => {
+    try {
+      const r = await apiFetch("/api/auth/me");
+      if (r.ok) {
+        const d = await r.json();
+        if (typeof d?.user?.credits === "number") setCredits(d.user.credits);
+      }
+    } catch {}
+  };
+
   // 计算
   const runningCount = queueItems.filter((q) => q.status === "running" || q.status === "queued").length;
   const canAddMore = formImageFile != null && runningCount < 5;
@@ -176,9 +176,10 @@ export default function BuildPage() {
     // 防御：localStorage 中的旧/损坏数据可能是非数组，直接 set 会导致 .map 崩溃
     if (saved?.queueItems && Array.isArray(saved.queueItems)) setQueueItems(saved.queueItems);
     if (saved?.preferences && typeof saved.preferences === "object") setPrefs(saved.preferences);
-    setCredits(loadCredits());
     setProfileLoaded((loadProfile().stats?.total || 0) > 0);
     setHydrated(true);
+    // 积分从后端读真实余额
+    refreshCredits();
   }, []);
 
   useEffect(() => { if (hydrated) saveState({ queueItems, preferences: prefs }); }, [queueItems, prefs, hydrated]);
@@ -321,8 +322,8 @@ export default function BuildPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "启动失败");
 
-      useCredit();
-      setCredits(loadCredits());
+      // 积分扣减在后端完成，这里刷新真实余额（失败提示由 res.ok 分支体现）
+      refreshCredits();
 
       const updatedItem: QueueItem = {
         ...item,
