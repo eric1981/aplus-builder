@@ -25,6 +25,10 @@ export interface User {
   monthlyLimit?: number | null;
   /** 积分余额（真实扣减） */
   credits: number;
+  /** 是否为代理（分销） */
+  isAgent?: boolean;
+  /** 代理专属码 */
+  agentCode?: string | null;
   createdAt: string;
 }
 
@@ -39,6 +43,8 @@ function rowToUser(row: Record<string, unknown>): User {
     dailyLimit: row.daily_limit == null ? null : Number(row.daily_limit),
     monthlyLimit: row.monthly_limit == null ? null : Number(row.monthly_limit),
     credits: Number(row.credits || 0),
+    isAgent: Boolean(Number(row.is_agent || 0)),
+    agentCode: row.agent_code ? String(row.agent_code) : null,
     createdAt: String(row.created_at || ""),
   };
 }

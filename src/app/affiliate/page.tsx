@@ -45,11 +45,25 @@ export default function AffiliatePage() {
   if (!data) return <div className="min-h-screen flex items-center justify-center text-sm text-muted">加载中…</div>;
 
   if (!data.isAgent) {
+    // 管理员不是代理：引导去管理后台的分销管理
+    if (user.role === "admin") {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-center px-4">
+          <div className="text-5xl">🤝</div>
+          <h1 className="text-xl font-bold">分销中心</h1>
+          <p className="text-sm text-text-muted max-w-sm">你是管理员。分销管理（设代理、手动绑定客户）在管理后台的"分销管理"页。</p>
+          <div className="flex gap-2">
+            <a href="/admin?tab=affiliate" className="px-5 py-2 bg-brand text-white rounded-lg text-sm hover:bg-brand-hover">前往分销管理</a>
+            <a href="/" className="px-5 py-2 border border-border rounded-lg text-sm text-muted hover:bg-gray-50">返回首页</a>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-center px-4">
         <div className="text-5xl">🤝</div>
         <h1 className="text-xl font-bold">分销中心</h1>
-        <p className="text-sm text-text-muted max-w-sm">你当前还不是代理。联系管理员开通代理身份后，即可通过专属二维码发展客户并获得收益。</p>
+        <p className="text-sm text-text-muted max-w-sm">你当前还不是代理。联系管理员开通代理身份后，即可通过专属邀请码发展客户并获得收益。</p>
         <a href="/" className="mt-2 px-5 py-2 bg-brand text-white rounded-lg text-sm hover:bg-brand-hover">返回首页</a>
       </div>
     );

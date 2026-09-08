@@ -146,7 +146,7 @@ export function listAgents(): { id: string; name: string; email: string | null; 
   try {
     return db
       .prepare(
-        `SELECT u.id, u.name, u.email, u.agent_code,
+        `SELECT u.id, u.name, u.email, u.agent_code AS code,
                 (SELECT COUNT(*) FROM referrals r WHERE r.agent_id = u.id) AS client_count
          FROM users u WHERE u.is_agent = 1 ORDER BY u.created_at ASC`,
       )
@@ -156,13 +156,14 @@ export function listAgents(): { id: string; name: string; email: string | null; 
   }
 }
 
-/** 未绑定代理的普通用户（管理后台下拉用） */
+/** 未绑定代理的普通用户（管理后台下拉用；代理不再作为可绑定客户） */
 export function listUnboundUsers(): { id: string; name: string }[] {
   try {
     return db
       .prepare(
         `SELECT u.id, u.name FROM users u
-         WHERE u.role = 'user' AND u.id NOT IN (SELECT user_id FROM referrals)
+         WHERE u.role = 'user' AND u.is_agent = 0
+           AND u.id NOT IN (SELECT user_id FROM referrals)
          ORDER BY u.created_at ASC`,
       )
       .all() as { id: string; name: string }[];

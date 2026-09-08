@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
     dailyLimit: u.dailyLimit ?? null,
     monthlyLimit: u.monthlyLimit ?? null,
     credits: u.credits,
+    isAgent: Boolean(u.isAgent),
+    agentCode: u.agentCode || null,
     usage: getUserQuotaUsage(u.id),
   }));
   return NextResponse.json({ users });

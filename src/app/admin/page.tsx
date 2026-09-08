@@ -17,6 +17,8 @@ interface AdminUser {
   dailyLimit: number | null;
   monthlyLimit: number | null;
   credits: number;
+  isAgent: boolean;
+  agentCode: string | null;
   usage: { daily: number; monthly: number };
 }
 
@@ -59,7 +61,9 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [settings, setSettings] = useState<SettingItem[]>([]);
-  const [tab, setTab] = useState<"users" | "audit" | "settings" | "affiliate">("users");
+  const [tab, setTab] = useState<"users" | "audit" | "settings" | "affiliate">(
+    () => (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "affiliate" ? "affiliate" : "users"),
+  );
 
   // 分销管理
   const [agents, setAgents] = useState<{
@@ -463,7 +467,14 @@ export default function AdminPage() {
                   {users.map((u) => (
                     <tr key={u.id} className={u.disabled ? "opacity-50" : ""}>
                       <td className="px-4 py-2">
-                        <div className="font-medium">{u.name}</div>
+                        <div className="font-medium flex items-center gap-1.5">
+                          {u.name}
+                          {u.isAgent && (
+                            <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 text-[10px] font-semibold" title={u.agentCode ? `专属码 ${u.agentCode}` : "代理"}>
+                              代理{u.agentCode ? ` · ${u.agentCode}` : ""}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-text-muted">{u.email || u.id}</div>
                       </td>
                       <td className="px-4 py-2">{u.role === "admin" ? "管理员" : "用户"}</td>
@@ -482,8 +493,12 @@ export default function AdminPage() {
                         <div className="flex gap-2 text-xs">
                           {u.role !== "admin" && (
                             <>
-                              <button onClick={() => promoteToAgent(u)}
-                                className="text-green-600 hover:text-green-800">设为代理</button>
+                              {u.isAgent ? (
+                                <span className="text-green-600 text-xs font-medium">✓ 代理</span>
+                              ) : (
+                                <button onClick={() => promoteToAgent(u)}
+                                  className="text-green-600 hover:text-green-800">设为代理</button>
+                              )}
                               <button onClick={() => patchUser(u.id, { disabled: !u.disabled })}
                                 className="text-amber-600 hover:text-amber-800">{u.disabled ? "启用" : "禁用"}</button>
                               <button onClick={() => patchUser(u.id, { role: u.role === "admin" ? "user" : "admin" })}
