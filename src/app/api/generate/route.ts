@@ -356,6 +356,8 @@ export async function POST(request: NextRequest) {
 
     let imgPath = "";
     let backImgPath = "";
+    // 专家模式：附加多视角参考图（文件路径 + 用户说明）
+    const expertRefs: { path: string; note: string }[] = [];
     let modelRefPath = "";
     let logoPath = "";
 
@@ -460,6 +462,27 @@ export async function POST(request: NextRequest) {
       const { buffer, ext } = validated;
       backImgPath = join(inputDir, `back.${ext}`);
       writeFileSync(backImgPath, buffer);
+    }
+
+    // 专家模式（mode=expert）：同款多视角附加参考图 + 每张用户提示词
+    // 前端传 ref_0..N（图文件）+ ref_note_0..N（该图用途/提示词文本）
+    if (mode === "expert") {
+      for (let i = 0; i < 6; i++) {
+        const refFile = formData.get(`ref_${i}`);
+        if (!refFile || typeof refFile !== "object" || !("arrayBuffer" in refFile)) break; // 遇空即止（连续编号）
+        const validated = await validateImageBlob(refFile as Blob);
+        if (!validated) {
+          return NextResponse.json({ error: `参考图 ${i + 1} 无效：仅支持 PNG/JPEG/WebP 且不超过 15MB` }, { status: 400 });
+        }
+        const { buffer, ext } = validated;
+        const p = join(inputDir, `ref${i}.${ext}`);
+        writeFileSync(p, buffer);
+        const note = (formData.get(`ref_note_${i}`) as string) || "";
+        expertRefs.push({ path: p, note });
+      }
+      if (expertRefs.length === 0) {
+        return NextResponse.json({ error: "专家模式需要至少 1 张附加参考图" }, { status: 400 });
+      }
     }
 
     if (!imgPath) {
@@ -583,6 +606,18 @@ export async function POST(request: NextRequest) {
         ``,
         `产品图：${imgPath}`,
         ...(backImgPath ? [`背面图：${backImgPath}（这是同一款产品的背面照片，用于补充还原背面细节，与产品图是同一款）`] : []),
+        ...(mode === "expert" && expertRefs.length > 0
+          ? [
+              ``,
+              `【专家模式 · 同款多视角附加参考】`,
+              `以下 ${expertRefs.length} 张图是与产品图同一款式的附加参考（视角/细节补充）。`,
+              ...expertRefs.map((r, i) =>
+                `参考图 ${i + 1}：${r.path}${r.note ? ` —— 用户提示：${r.note}` : ""}`,
+              ),
+              `- 产品主体（颜色/款式/结构）始终以产品图 ${imgPath} 为准；附加参考只补充产品图未覆盖的视角与细节。`,
+              `- 用户对某张附加参考的提示只描述该视角的观察要点或期望体现的细节，不得与产品图冲突；冲突时以产品图为准。`,
+            ]
+          : []),
         ...(modelRefPath ? [`模特参考图：${modelRefPath}`] : []),
         ...(logoPath ? [`品牌 Logo：${logoPath}（请将 Logo 嵌入详情页顶部品牌区或底部页脚，使用 <img src="./logo.png"> 引用，保持原始比例不拉伸变形）`] : []),
         descBlock,

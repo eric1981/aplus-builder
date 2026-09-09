@@ -142,6 +142,9 @@ export default function BuildPage() {
   const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
   const [showPrefs, setShowPrefs] = useState(false);
   const [generationMode, setGenerationMode] = useState<"detail" | "single">("detail");
+  // 专家模式：同款多视角附加参考图 + 每张提示词（叠加在详情页生成上）
+  const [expertMode, setExpertMode] = useState(false);
+  const [expertRefs, setExpertRefs] = useState<{ id: string; file: File; dataUrl: string; note: string }[]>([]);
   const [credits, setCredits] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -158,6 +161,7 @@ export default function BuildPage() {
   const backFileRef = useRef<HTMLInputElement>(null);
   const modelFileRef = useRef<HTMLInputElement>(null);
   const logoFileRef = useRef<HTMLInputElement>(null);
+  const expertFileRef = useRef<HTMLInputElement>(null);
 
   // 从后端读真实积分余额（扣减在服务端做，前端只展示）
   const refreshCredits = async () => {
@@ -277,11 +281,16 @@ export default function BuildPage() {
     setFormLogoImage(null); setFormLogoImageFile(null);
     setFormDescription(""); setFormProductName(""); setFormCategory("");
     setFormTopLength(""); setFormTopFit(""); setFormBottomLength(""); setFormBottomFit("");
+    setExpertRefs([]);
   };
 
   // -- 加入队列 --
   const handleAddToQueue = async () => {
     if (!formImageFile) return;
+    if (expertMode && expertRefs.length === 0) {
+      window.alert("专家模式需要至少添加 1 张附加参考图");
+      return;
+    }
 
     const item: QueueItem = {
       id: newId(),
@@ -314,7 +323,14 @@ export default function BuildPage() {
       if (formTopFit) formData.append("top_fit", formTopFit);
       if (formBottomLength) formData.append("bottom_length", formBottomLength);
       if (formBottomFit) formData.append("bottom_fit", formBottomFit);
-      formData.append("mode", generationMode);
+      formData.append("mode", expertMode ? "expert" : generationMode);
+      // 专家模式：附加参考图 + 每张提示词
+      if (expertMode) {
+        expertRefs.forEach((r, i) => {
+          formData.append(`ref_${i}`, r.file);
+          formData.append(`ref_note_${i}`, r.note);
+        });
+      }
       formData.append("preferences", JSON.stringify(prefs));
 
       if (selectedCustomerId) {
@@ -745,6 +761,63 @@ export default function BuildPage() {
               ? "只生成 1 张场景图，不生成 HTML 详情页、白底图和多场景图。"
               : "生成完整 A+ 详情页，含多张场景图、白底主图、多版本变体。"}
           </p>
+        </div>
+
+        {/* ===== 专家模式：同款多视角附加参考图 + 每张提示词 ===== */}
+        <div className="p-4 bg-purple-50/60 border border-purple-100 rounded-xl">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={expertMode}
+              onChange={(e) => { setExpertMode(e.target.checked); if (e.target.checked && generationMode === "single") setGenerationMode("detail"); }}
+              className="w-4 h-4 accent-[var(--accent)]" />
+            <span className="text-sm font-semibold">🎯 专家模式</span>
+            <span className="text-[10px] text-text-muted font-normal">（同款多视角参考：上传正面以外的视角/细节图，并为每张填写提示词；仅详情页生成可用）</span>
+          </label>
+
+          {expertMode && (
+            <div className="mt-3 space-y-3">
+              <p className="text-xs text-text-muted">附加参考图（同一款式的背面 / 细节 / 其他视角，与产品图互补）。最多 6 张。产品主体颜色/款式始终以主产品图为准。</p>
+
+              {expertRefs.map((r, idx) => (
+                <div key={r.id} className="flex gap-3 p-2.5 bg-white rounded-xl border border-purple-100">
+                  <div className="w-16 h-20 rounded-lg overflow-hidden bg-gray-50 border border-border flex-shrink-0">
+                    <img src={r.dataUrl} alt={`参考 ${idx + 1}`} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-purple-700">参考图 {idx + 1}</span>
+                      <button onClick={() => setExpertRefs((prev) => prev.filter((x) => x.id !== r.id))}
+                        className="text-red-400 hover:text-red-600 text-xs">移除</button>
+                    </div>
+                    <input value={r.note}
+                      onChange={(e) => setExpertRefs((prev) => prev.map((x) => (x.id === r.id ? { ...x, note: e.target.value } : x)))}
+                      placeholder="提示词（可选）：这张图是什么视角/希望体现什么，如：'这是背面图，拉链在背部中央'"
+                      className="w-full text-xs border border-border rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:border-purple-300" />
+                  </div>
+                </div>
+              ))}
+
+              {expertRefs.length < 6 && (
+                <div onClick={() => expertFileRef.current?.click()}
+                  className="border-2 border-dashed border-purple-200 rounded-xl p-4 text-center cursor-pointer hover:border-purple-400 transition-colors">
+                  <p className="text-xs text-purple-600">➕ 添加参考图（可多选）</p>
+                  <input ref={expertFileRef} type="file" accept="image/*" multiple className="hidden"
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files) {
+                        Array.from(files).filter((f) => f.type.startsWith("image/")).forEach((f) => {
+                          const id = `er${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                          const reader = new FileReader();
+                          reader.onload = () => setExpertRefs((prev) =>
+                            prev.length >= 6 ? prev : [...prev, { id, file: f, dataUrl: reader.result as string, note: "" }]);
+                          reader.readAsDataURL(f);
+                        });
+                      }
+                      e.target.value = "";
+                    }} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ===== 按钮区 ===== */}
