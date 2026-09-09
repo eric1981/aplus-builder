@@ -141,9 +141,8 @@ export default function BuildPage() {
   // -- 全局 --
   const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
   const [showPrefs, setShowPrefs] = useState(false);
-  const [generationMode, setGenerationMode] = useState<"detail" | "single">("detail");
-  // 专家模式：同款多视角附加参考图 + 每张提示词（叠加在详情页生成上）
-  const [expertMode, setExpertMode] = useState(false);
+  const [generationMode, setGenerationMode] = useState<"detail" | "single" | "expert">("detail");
+  // 专家模式（生成模式=expert）：同款多视角附加参考图 + 每张提示词
   const [expertRefs, setExpertRefs] = useState<{ id: string; file: File; dataUrl: string; note: string }[]>([]);
   const [credits, setCredits] = useState(0);
   const [hydrated, setHydrated] = useState(false);
@@ -287,7 +286,7 @@ export default function BuildPage() {
   // -- 加入队列 --
   const handleAddToQueue = async () => {
     if (!formImageFile) return;
-    if (expertMode && expertRefs.length === 0) {
+    if (generationMode === "expert" && expertRefs.length === 0) {
       window.alert("专家模式需要至少添加 1 张附加参考图");
       return;
     }
@@ -323,9 +322,9 @@ export default function BuildPage() {
       if (formTopFit) formData.append("top_fit", formTopFit);
       if (formBottomLength) formData.append("bottom_length", formBottomLength);
       if (formBottomFit) formData.append("bottom_fit", formBottomFit);
-      formData.append("mode", expertMode ? "expert" : generationMode);
+      formData.append("mode", generationMode);
       // 专家模式：附加参考图 + 每张提示词
-      if (expertMode) {
+      if (generationMode === "expert") {
         expertRefs.forEach((r, i) => {
           formData.append(`ref_${i}`, r.file);
           formData.append(`ref_note_${i}`, r.note);
@@ -734,7 +733,7 @@ export default function BuildPage() {
         {/* ===== 生成模式 ===== */}
         <div>
           <h2 className="text-base sm:text-lg font-semibold mb-1">生成模式</h2>
-          <div className="flex gap-1 bg-gray-100 rounded-xl p-1 max-w-xs">
+          <div className="flex gap-1 bg-gray-100 rounded-xl p-1 max-w-md">
             <button
               onClick={() => setGenerationMode("detail")}
               className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
@@ -755,25 +754,34 @@ export default function BuildPage() {
             >
               🖼️ 单图
             </button>
+            <button
+              onClick={() => setGenerationMode("expert")}
+              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                generationMode === "expert"
+                  ? "bg-white shadow text-brand"
+                  : "text-text-muted hover:text-text"
+              }`}
+            >
+              🎯 专家
+            </button>
           </div>
           <p className="text-xs text-text-muted mt-1.5">
-            {generationMode === "single"
-              ? "只生成 1 张场景图，不生成 HTML 详情页、白底图和多场景图。"
-              : "生成完整 A+ 详情页，含多张场景图、白底主图、多版本变体。"}
+            {generationMode === "expert"
+              ? "同款多视角生成：上传正面以外的视角/细节图，并为每张填写提示词，生成完整 A+ 详情页。"
+              : generationMode === "single"
+                ? "只生成 1 张场景图，不生成 HTML 详情页、白底图和多场景图。"
+                : "生成完整 A+ 详情页，含多张场景图、白底主图、多版本变体。"}
           </p>
         </div>
 
-        {/* ===== 专家模式：同款多视角附加参考图 + 每张提示词 ===== */}
-        <div className="p-4 bg-purple-50/60 border border-purple-100 rounded-xl">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={expertMode}
-              onChange={(e) => { setExpertMode(e.target.checked); if (e.target.checked && generationMode === "single") setGenerationMode("detail"); }}
-              className="w-4 h-4 accent-[var(--accent)]" />
-            <span className="text-sm font-semibold">🎯 专家模式</span>
-            <span className="text-[10px] text-text-muted font-normal">（同款多视角参考：上传正面以外的视角/细节图，并为每张填写提示词；仅详情页生成可用）</span>
-          </label>
+        {/* ===== 专家模式：同款多视角附加参考图 + 每张提示词（仅专家 tab 显示） ===== */}
+        {generationMode === "expert" && (
+          <div className="p-4 bg-purple-50/60 border border-purple-100 rounded-xl">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold">🎯 专家参考图</span>
+              <span className="text-[10px] text-text-muted font-normal">（同款多视角：上传正面以外的视角/细节图，并为每张填写提示词）</span>
+            </div>
 
-          {expertMode && (
             <div className="mt-3 space-y-3">
               <p className="text-xs text-text-muted">附加参考图（同一款式的背面 / 细节 / 其他视角，与产品图互补）。最多 6 张。产品主体颜色/款式始终以主产品图为准。</p>
 
@@ -817,8 +825,8 @@ export default function BuildPage() {
                 </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* ===== 按钮区 ===== */}
         <div className="flex flex-col gap-3">
