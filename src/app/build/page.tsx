@@ -142,7 +142,12 @@ export default function BuildPage() {
   const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
   const [showPrefs, setShowPrefs] = useState(false);
   const [generationMode, setGenerationMode] = useState<"detail" | "single" | "expert">("detail");
-  // 专家模式（生成模式=expert）：同款多视角附加参考图 + 每张提示词
+  // 专家模式（独立页面）：主产品图 + 同款多视角附加参考图 + 每张提示词
+  // 与傻瓜式表单完全隔离，不复用 product/back/model/logo/品类/偏好等字段
+  const [expertMainImage, setExpertMainImage] = useState<string | null>(null);
+  const [expertMainFile, setExpertMainFile] = useState<File | null>(null);
+  const [expertName, setExpertName] = useState("");
+  const [expertDesc, setExpertDesc] = useState("");
   const [expertRefs, setExpertRefs] = useState<{ id: string; file: File; dataUrl: string; note: string }[]>([]);
   const [credits, setCredits] = useState(0);
   const [hydrated, setHydrated] = useState(false);
@@ -161,6 +166,7 @@ export default function BuildPage() {
   const modelFileRef = useRef<HTMLInputElement>(null);
   const logoFileRef = useRef<HTMLInputElement>(null);
   const expertFileRef = useRef<HTMLInputElement>(null);
+  const expertMainFileRef = useRef<HTMLInputElement>(null);
 
   // 从后端读真实积分余额（扣减在服务端做，前端只展示）
   const refreshCredits = async () => {
@@ -273,6 +279,14 @@ export default function BuildPage() {
     reader.readAsDataURL(file);
   }, []);
 
+  const handleExpertMainUpload = useCallback((file: File | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setExpertMainFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setExpertMainImage(reader.result as string);
+    reader.readAsDataURL(file);
+  }, []);
+
   const resetForm = () => {
     setFormImage(null); setFormImageFile(null);
     setFormBackImage(null); setFormBackImageFile(null);
@@ -280,16 +294,11 @@ export default function BuildPage() {
     setFormLogoImage(null); setFormLogoImageFile(null);
     setFormDescription(""); setFormProductName(""); setFormCategory("");
     setFormTopLength(""); setFormTopFit(""); setFormBottomLength(""); setFormBottomFit("");
-    setExpertRefs([]);
   };
 
   // -- 加入队列 --
   const handleAddToQueue = async () => {
     if (!formImageFile) return;
-    if (generationMode === "expert" && expertRefs.length === 0) {
-      window.alert("专家模式需要至少添加 1 张附加参考图");
-      return;
-    }
 
     const item: QueueItem = {
       id: newId(),
@@ -322,14 +331,8 @@ export default function BuildPage() {
       if (formTopFit) formData.append("top_fit", formTopFit);
       if (formBottomLength) formData.append("bottom_length", formBottomLength);
       if (formBottomFit) formData.append("bottom_fit", formBottomFit);
-      formData.append("mode", generationMode);
-      // 专家模式：附加参考图 + 每张提示词
-      if (generationMode === "expert") {
-        expertRefs.forEach((r, i) => {
-          formData.append(`ref_${i}`, r.file);
-          formData.append(`ref_note_${i}`, r.note);
-        });
-      }
+      // 傻瓜式模式（详情页/单图）：mode 只可能是 detail 或 single
+      formData.append("mode", generationMode === "single" ? "single" : "detail");
       formData.append("preferences", JSON.stringify(prefs));
 
       if (selectedCustomerId) {
@@ -370,6 +373,93 @@ export default function BuildPage() {
       // 立即持久化（避免跳转后 output 页水合时 localStorage 尚未更新的竞态）
       saveState({ queueItems: [...queueItems, updatedItem], preferences: prefs });
       // 跳转到产出中心查看进度
+      router.push("/output");
+    } catch (e) {
+      setQueueItems((prev) =>
+        prev.map((qi) =>
+          qi.id === item.id ? { ...qi, status: "error" } : qi
+        )
+      );
+    }
+  };
+
+  // -- 专家模式：独立提交（mode=expert，主产品图 + 附加参考图 + 每张提示词） --
+  const handleExpertSubmit = async () => {
+    if (!expertMainFile) return;
+    if (expertRefs.length === 0) {
+      window.alert("专家模式需要至少添加 1 张附加参考图");
+      return;
+    }
+
+    const item: QueueItem = {
+      id: newId(),
+      image: expertMainImage,
+      imageFile: expertMainFile,
+      backImage: null,
+      backImageFile: null,
+      modelImage: null,
+      modelImageFile: null,
+      logoImage: null,
+      logoImageFile: null,
+      description: expertDesc,
+      productName: expertName,
+      status: "idle",
+    };
+
+    setQueueItems((prev) => [...prev, item]);
+
+    try {
+      const formData = new FormData();
+      // 主产品图：作为产品主体锚点（image_0）
+      formData.append("image_0", item.imageFile!);
+      formData.append("description", item.description);
+      formData.append("product_name", item.productName);
+      formData.append("mode", "expert");
+      // 附加参考图（同款多视角）+ 每张用户提示词
+      expertRefs.forEach((r, i) => {
+        formData.append(`ref_${i}`, r.file);
+        formData.append(`ref_note_${i}`, r.note);
+      });
+      // 专家模式独立于傻瓜式偏好：不把傻瓜式的排版/模特选择带入
+      formData.append("preferences", JSON.stringify(DEFAULT_PREFS));
+
+      if (selectedCustomerId) {
+        const cust = customers.find((c) => c.id === selectedCustomerId);
+        if (cust) {
+          formData.append("customer_id", cust.id);
+          formData.append("customer_name", cust.name);
+          if (cust.sizeChartCsv) formData.append("customer_size_chart", cust.sizeChartCsv);
+          if (cust.requirements) formData.append("customer_requirements", cust.requirements);
+          // 客户绑定的模板：客户专属排版仍适用（模板属于客户档案而非傻瓜式偏好）
+          if (cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
+        }
+      }
+
+      const profile = loadProfile();
+      if (profile.stats.total > 0) {
+        const ctx = getProfileContext(profile);
+        if (ctx) formData.append("profile_context", ctx);
+      }
+
+      const res = await apiFetch("/api/generate", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "启动失败");
+
+      refreshCredits();
+
+      const updatedItem: QueueItem = {
+        ...item,
+        taskId: data.taskId,
+        status: data.queued ? "queued" : "running",
+      };
+      setQueueItems((prev) =>
+        prev.map((qi) => (qi.id === item.id ? updatedItem : qi))
+      );
+      saveState({ queueItems: [...queueItems, updatedItem], preferences: prefs });
+      // 清空专家表单（等待下次输入）
+      setExpertMainImage(null); setExpertMainFile(null);
+      setExpertName(""); setExpertDesc("");
+      setExpertRefs([]);
       router.push("/output");
     } catch (e) {
       setQueueItems((prev) =>
@@ -451,6 +541,147 @@ export default function BuildPage() {
           );
         })()}
 
+        {/* ===== 生成模式（并行入口，置于产品图片上方） ===== */}
+        <div className="flex gap-2">
+          {([
+            { v: "detail", label: "📄 详情页" },
+            { v: "single", label: "🖼️ 单图" },
+            { v: "expert", label: "🎯 专家模式" },
+          ] as const).map((m) => (
+            <button key={m.v} onClick={() => setGenerationMode(m.v)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition ${
+                generationMode === m.v
+                  ? "bg-accent text-accent-on border-accent"
+                  : "bg-white text-muted border-border hover:border-accent"
+              }`}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-text-muted -mt-3">
+          {generationMode === "expert"
+            ? "专家模式与傻瓜式生成是两种并行模式：这里独立设置主产品图与同款多视角参考图，不使用下方的背面图/模特图/品类/偏好等傻瓜式字段。"
+            : generationMode === "single"
+              ? "傻瓜式生成：上传产品图即可，只出 1 张场景图（不生成详情页 HTML）。"
+              : "傻瓜式生成：上传产品图即可自动完成全套 A+ 详情页，可批量入队。"}
+        </p>
+
+        {generationMode === "expert" ? (
+          <>{/* ===== 专家模式（全新独立页面逻辑） ===== */}
+            <div className="p-4 bg-purple-50/60 border border-purple-100 rounded-xl">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold">🎯 专家模式</span>
+                <span className="text-[10px] text-text-muted font-normal">（同款多视角：主产品图 + 附加参考图，每张参考图可写提示词）</span>
+              </div>
+              <p className="text-xs text-text-muted mt-1">与傻瓜式生成互不干扰：本页面只收集专家生成所需的主图与参考图，生成完整 A+ 详情页。产品主体（颜色/款式/结构）始终以主产品图为准。</p>
+            </div>
+
+            {/* 专家：主产品图（必填） */}
+            <div>
+              <h2 className="text-base sm:text-lg font-semibold mb-1">主产品图 <span className="text-red-400 text-xs ml-1">必填</span></h2>
+              <p className="text-text-muted text-xs sm:text-sm mb-4">正面/基准视角的产品图，作为产品主体锚点。</p>
+              {expertMainImage ? (
+                <div className="relative w-36 sm:w-48 aspect-[3/4] rounded-xl overflow-hidden bg-gray-100 shadow-sm">
+                  <img src={expertMainImage} alt="主产品图" className="w-full h-full object-cover" />
+                  <button onClick={() => { setExpertMainImage(null); setExpertMainFile(null); }} className="absolute top-2 right-2 w-7 h-7 bg-black/60 text-white rounded-full flex items-center justify-center text-sm hover:bg-black/80 transition-colors">✕</button>
+                </div>
+              ) : (
+                <div onClick={() => expertMainFileRef.current?.click()}
+                  className="border-2 border-dashed border-purple-200 rounded-xl p-8 sm:p-12 text-center cursor-pointer hover:border-purple-400 transition-colors">
+                  <div className="text-2xl sm:text-3xl mb-2">📷</div>
+                  <p className="text-text-muted text-xs sm:text-sm">点击上传主产品图</p>
+                  <p className="text-text-muted text-[10px] sm:text-xs mt-1">JPG / PNG / WebP</p>
+                  <input ref={expertMainFileRef} type="file" accept="image/*" className="hidden"
+                    onChange={(e) => handleExpertMainUpload(e.target.files?.[0] || null)} />
+                </div>
+              )}
+            </div>
+
+            {/* 专家：附加参考图 + 每张提示词 */}
+            <div className="p-4 bg-purple-50/60 border border-purple-100 rounded-xl">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold">🎯 附加参考图</span>
+                <span className="text-[10px] text-text-muted font-normal">（同款多视角：背面/细节/其他角度，最多 6 张，至少 1 张）</span>
+              </div>
+
+              <div className="mt-3 space-y-3">
+                {expertRefs.map((r, idx) => (
+                  <div key={r.id} className="flex gap-3 p-2.5 bg-white rounded-xl border border-purple-100">
+                    <div className="w-16 h-20 rounded-lg overflow-hidden bg-gray-50 border border-border flex-shrink-0">
+                      <img src={r.dataUrl} alt={`参考 ${idx + 1}`} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-purple-700">参考图 {idx + 1}</span>
+                        <button onClick={() => setExpertRefs((prev) => prev.filter((x) => x.id !== r.id))}
+                          className="text-red-400 hover:text-red-600 text-xs">移除</button>
+                      </div>
+                      <input value={r.note}
+                        onChange={(e) => setExpertRefs((prev) => prev.map((x) => (x.id === r.id ? { ...x, note: e.target.value } : x)))}
+                        placeholder="提示词（可选）：这张图是什么视角/希望体现什么，如：'这是背面图，拉链在背部中央'"
+                        className="w-full text-xs border border-border rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:border-purple-300" />
+                    </div>
+                  </div>
+                ))}
+
+                {expertRefs.length < 6 && (
+                  <div onClick={() => expertFileRef.current?.click()}
+                    className="border-2 border-dashed border-purple-200 rounded-xl p-4 text-center cursor-pointer hover:border-purple-400 transition-colors">
+                    <p className="text-xs text-purple-600">➕ 添加参考图（可多选）</p>
+                    <input ref={expertFileRef} type="file" accept="image/*" multiple className="hidden"
+                      onChange={(e) => {
+                        const files = e.target.files;
+                        if (files) {
+                          Array.from(files).filter((f) => f.type.startsWith("image/")).forEach((f) => {
+                            const id = `er${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                            const reader = new FileReader();
+                            reader.onload = () => setExpertRefs((prev) =>
+                              prev.length >= 6 ? prev : [...prev, { id, file: f, dataUrl: reader.result as string, note: "" }]);
+                            reader.readAsDataURL(f);
+                          });
+                        }
+                        e.target.value = "";
+                      }} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 专家：可选命名信息 */}
+            <div>
+              <h2 className="text-base sm:text-lg font-semibold mb-1">产品名称 <span className="text-text-muted text-xs sm:text-sm font-normal ml-2">（可选）</span></h2>
+              <input type="text" value={expertName} onChange={(e) => setExpertName(e.target.value)}
+                placeholder="例如：法式复古连衣裙"
+                className="w-full max-w-sm px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-200 focus:border-purple-300" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-semibold mb-1">产品描述 <span className="text-text-muted text-xs sm:text-sm font-normal ml-2">（可选）</span></h2>
+              <textarea value={expertDesc} onChange={(e) => setExpertDesc(e.target.value)}
+                placeholder="例如：法式复古连衣裙，高支棉质面料，方领设计…"
+                rows={3}
+                className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-200 focus:border-purple-300 resize-none" />
+            </div>
+
+            {/* 专家：提交 */}
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-2">
+                <button onClick={handleExpertSubmit}
+                  disabled={!expertMainFile || expertRefs.length === 0 || runningCount >= 5}
+                  className="flex-1 py-3 bg-brand text-white rounded-xl text-base font-medium hover:bg-brand-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                  🎯 开始专家生成
+                </button>
+              </div>
+              {!expertMainFile && <p className="text-xs text-red-400">请先上传主产品图</p>}
+              {expertMainFile && expertRefs.length === 0 && <p className="text-xs text-red-400">专家模式需要至少添加 1 张附加参考图</p>}
+
+              <a href="/output"
+                className="w-full py-3 border-2 border-dashed border-border rounded-xl text-text-muted hover:text-brand hover:border-brand/30 transition-colors flex items-center justify-center gap-2 text-sm font-medium">
+                📋 查看所有产出
+              </a>
+            </div>
+          </>
+        ) : (
+          <>
         {/* ===== 上传区 ===== */}
         <div>
           <h2 className="text-base sm:text-lg font-semibold mb-1">产品图片</h2>
@@ -730,105 +961,7 @@ export default function BuildPage() {
           )}
         </div>
 
-        {/* ===== 生成模式 ===== */}
-        <div>
-          <h2 className="text-base sm:text-lg font-semibold mb-1">生成模式</h2>
-          <div className="flex gap-1 bg-gray-100 rounded-xl p-1 max-w-md">
-            <button
-              onClick={() => setGenerationMode("detail")}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
-                generationMode === "detail"
-                  ? "bg-white shadow text-brand"
-                  : "text-text-muted hover:text-text"
-              }`}
-            >
-              📄 详情页
-            </button>
-            <button
-              onClick={() => setGenerationMode("single")}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
-                generationMode === "single"
-                  ? "bg-white shadow text-brand"
-                  : "text-text-muted hover:text-text"
-              }`}
-            >
-              🖼️ 单图
-            </button>
-            <button
-              onClick={() => setGenerationMode("expert")}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
-                generationMode === "expert"
-                  ? "bg-white shadow text-brand"
-                  : "text-text-muted hover:text-text"
-              }`}
-            >
-              🎯 专家
-            </button>
-          </div>
-          <p className="text-xs text-text-muted mt-1.5">
-            {generationMode === "expert"
-              ? "同款多视角生成：上传正面以外的视角/细节图，并为每张填写提示词，生成完整 A+ 详情页。"
-              : generationMode === "single"
-                ? "只生成 1 张场景图，不生成 HTML 详情页、白底图和多场景图。"
-                : "生成完整 A+ 详情页，含多张场景图、白底主图、多版本变体。"}
-          </p>
-        </div>
-
-        {/* ===== 专家模式：同款多视角附加参考图 + 每张提示词（仅专家 tab 显示） ===== */}
-        {generationMode === "expert" && (
-          <div className="p-4 bg-purple-50/60 border border-purple-100 rounded-xl">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold">🎯 专家参考图</span>
-              <span className="text-[10px] text-text-muted font-normal">（同款多视角：上传正面以外的视角/细节图，并为每张填写提示词）</span>
-            </div>
-
-            <div className="mt-3 space-y-3">
-              <p className="text-xs text-text-muted">附加参考图（同一款式的背面 / 细节 / 其他视角，与产品图互补）。最多 6 张。产品主体颜色/款式始终以主产品图为准。</p>
-
-              {expertRefs.map((r, idx) => (
-                <div key={r.id} className="flex gap-3 p-2.5 bg-white rounded-xl border border-purple-100">
-                  <div className="w-16 h-20 rounded-lg overflow-hidden bg-gray-50 border border-border flex-shrink-0">
-                    <img src={r.dataUrl} alt={`参考 ${idx + 1}`} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-purple-700">参考图 {idx + 1}</span>
-                      <button onClick={() => setExpertRefs((prev) => prev.filter((x) => x.id !== r.id))}
-                        className="text-red-400 hover:text-red-600 text-xs">移除</button>
-                    </div>
-                    <input value={r.note}
-                      onChange={(e) => setExpertRefs((prev) => prev.map((x) => (x.id === r.id ? { ...x, note: e.target.value } : x)))}
-                      placeholder="提示词（可选）：这张图是什么视角/希望体现什么，如：'这是背面图，拉链在背部中央'"
-                      className="w-full text-xs border border-border rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:border-purple-300" />
-                  </div>
-                </div>
-              ))}
-
-              {expertRefs.length < 6 && (
-                <div onClick={() => expertFileRef.current?.click()}
-                  className="border-2 border-dashed border-purple-200 rounded-xl p-4 text-center cursor-pointer hover:border-purple-400 transition-colors">
-                  <p className="text-xs text-purple-600">➕ 添加参考图（可多选）</p>
-                  <input ref={expertFileRef} type="file" accept="image/*" multiple className="hidden"
-                    onChange={(e) => {
-                      const files = e.target.files;
-                      if (files) {
-                        Array.from(files).filter((f) => f.type.startsWith("image/")).forEach((f) => {
-                          const id = `er${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-                          const reader = new FileReader();
-                          reader.onload = () => setExpertRefs((prev) =>
-                            prev.length >= 6 ? prev : [...prev, { id, file: f, dataUrl: reader.result as string, note: "" }]);
-                          reader.readAsDataURL(f);
-                        });
-                      }
-                      e.target.value = "";
-                    }} />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ===== 按钮区 ===== */}
+        {/* ===== 按钮区（傻瓜式模式） ===== */}
         <div className="flex flex-col gap-3">
           <div className="flex gap-2">
             <button onClick={handleAddToQueue} disabled={!canAddMore}
@@ -842,6 +975,8 @@ export default function BuildPage() {
             📋 查看所有产出
           </a>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
