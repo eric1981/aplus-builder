@@ -527,19 +527,23 @@ export async function POST(request: NextRequest) {
       prefLines.push(`- 款式要求：${styleSpecs.join("，")}（用户指定，生成时必须在版型/长度上严格遵守，模特穿着需清晰体现）`);
     }
 
-    // 客户自定义风格模板优先级最高
-    if (customTemplateId) {
-      const templatePath = join(process.cwd(), "customer-templates", `${customTemplateId}.html`);
-      prefLines.push(`- 排版风格：使用客户自定义模板 \"${templatePath}\"（必须严格参考此模板的视觉风格、配色、字体、模块结构来生成详情页）`);
-    } else if (uiPrefs.odStyle) {
-      prefLines.push(`- 排版风格：使用 Open Design 模板 "${uiPrefs.odStyle}"（用户指定，必须使用）`);
-    } else if (uiPrefs.style && uiPrefs.style !== "auto") {
-      const styleLabel: Record<string, string> = {
-        "editorial": "Editorial 暖杂志风", "swiss": "Swiss 瑞士风",
-        "product-launch": "Product Launch 暗底Hero风", "xhs-pastel": "小红书 Pastel 马卡龙风",
-        "amazon-premium": "Amazon Premium A+ 原生风",
-      };
-      prefLines.push(`- 排版风格：${styleLabel[uiPrefs.style] || uiPrefs.style}（用户指定，必须使用）`);
+    // 定制模板/排版风格：仅对生成 HTML 详情页的模式（套图+Aplus / 专家模式）注入。
+    // 单图模式只出 1 张图片，不需要任何排版信息，前端也不提供定制模板/排版风格选择。
+    if (mode !== "single") {
+      // 客户自定义风格模板优先级最高
+      if (customTemplateId) {
+        const templatePath = join(process.cwd(), "customer-templates", `${customTemplateId}.html`);
+        prefLines.push(`- 排版风格：使用客户自定义模板 \"${templatePath}\"（必须严格参考此模板的视觉风格、配色、字体、模块结构来生成详情页）`);
+      } else if (uiPrefs.odStyle) {
+        prefLines.push(`- 排版风格：使用 Open Design 模板 "${uiPrefs.odStyle}"（用户指定，必须使用）`);
+      } else if (uiPrefs.style && uiPrefs.style !== "auto") {
+        const styleLabel: Record<string, string> = {
+          "editorial": "Editorial 暖杂志风", "swiss": "Swiss 瑞士风",
+          "product-launch": "Product Launch 暗底Hero风", "xhs-pastel": "小红书 Pastel 马卡龙风",
+          "amazon-premium": "Amazon Premium A+ 原生风",
+        };
+        prefLines.push(`- 排版风格：${styleLabel[uiPrefs.style] || uiPrefs.style}（用户指定，必须使用）`);
+      }
     }
 
     const styleLabel: Record<string, string> = {

@@ -331,9 +331,13 @@ export default function BuildPage() {
       if (formTopFit) formData.append("top_fit", formTopFit);
       if (formBottomLength) formData.append("bottom_length", formBottomLength);
       if (formBottomFit) formData.append("bottom_fit", formBottomFit);
-      // 傻瓜式模式（详情页/单图）：mode 只可能是 detail 或 single
-      formData.append("mode", generationMode === "single" ? "single" : "detail");
-      formData.append("preferences", JSON.stringify(prefs));
+      // 傻瓜式模式（套图+Aplus / 单图）
+      const isSingle = generationMode === "single";
+      formData.append("mode", isSingle ? "single" : "detail");
+      // 单图只需要出图，不带任何排版信息（style/odStyle 归零，仅保留模特偏好）
+      formData.append("preferences", JSON.stringify(
+        isSingle ? { style: "auto", odStyle: "", model: prefs.model } : prefs
+      ));
 
       if (selectedCustomerId) {
         const cust = customers.find((c) => c.id === selectedCustomerId);
@@ -342,12 +346,12 @@ export default function BuildPage() {
           formData.append("customer_name", cust.name);
           if (cust.sizeChartCsv) formData.append("customer_size_chart", cust.sizeChartCsv);
           if (cust.requirements) formData.append("customer_requirements", cust.requirements);
-          // 客户绑定的模板：仅当用户没直接选模板时使用
-          if (!selectedTemplateId && cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
+          // 客户绑定的模板：仅套图+Aplus 使用（单图不需要排版），且用户没直接选模板时
+          if (!isSingle && !selectedTemplateId && cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
         }
       }
-      // 用户直接选择的复刻模板（优先于客户绑定）
-      if (selectedTemplateId) formData.append("custom_template_id", selectedTemplateId);
+      // 用户直接选择的复刻模板：仅套图+Aplus 使用（优先于客户绑定）
+      if (!isSingle && selectedTemplateId) formData.append("custom_template_id", selectedTemplateId);
 
       const profile = loadProfile();
       if (profile.stats.total > 0) {
@@ -420,8 +424,8 @@ export default function BuildPage() {
         formData.append(`ref_${i}`, r.file);
         formData.append(`ref_note_${i}`, r.note);
       });
-      // 专家模式独立于傻瓜式偏好：不把傻瓜式的排版/模特选择带入
-      formData.append("preferences", JSON.stringify(DEFAULT_PREFS));
+      // 专家模式同样支持定制模板 / 排版风格（用户在本页「排版偏好」选择）
+      formData.append("preferences", JSON.stringify(prefs));
 
       if (selectedCustomerId) {
         const cust = customers.find((c) => c.id === selectedCustomerId);
@@ -430,10 +434,12 @@ export default function BuildPage() {
           formData.append("customer_name", cust.name);
           if (cust.sizeChartCsv) formData.append("customer_size_chart", cust.sizeChartCsv);
           if (cust.requirements) formData.append("customer_requirements", cust.requirements);
-          // 客户绑定的模板：客户专属排版仍适用（模板属于客户档案而非傻瓜式偏好）
-          if (cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
+          // 客户绑定的模板：仅当用户没直接选模板时使用
+          if (!selectedTemplateId && cust.customTemplateId) formData.append("custom_template_id", cust.customTemplateId);
         }
       }
+      // 用户直接选择的复刻模板（优先于客户绑定）
+      if (selectedTemplateId) formData.append("custom_template_id", selectedTemplateId);
 
       const profile = loadProfile();
       if (profile.stats.total > 0) {
@@ -469,6 +475,93 @@ export default function BuildPage() {
       );
     }
   };
+
+  // 定制模板 + 排版风格选择（套图+Aplus 与 专家模式 共用；单图只需出图不需要排版，不渲染）
+  const renderTemplateAndStylePrefs = () => (
+    <>
+      {/* 定制模板（复刻产出，直接选用） */}
+      {templates.length > 0 && (
+        <div>
+          <label className="block text-sm font-medium mb-1">定制模板 <span className="text-[10px] text-muted font-normal">（复刻的风格模板，选中后覆盖排版风格）</span></label>
+          <p className="text-[10px] text-text-muted mb-2">在"产出中心 → 风格模板"可预览和管理模板。</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {templates.map((t) => (
+              <button key={t.id}
+                onClick={() => {
+                  const next = selectedTemplateId === t.id ? "" : t.id;
+                  setSelectedTemplateId(next);
+                  // 选模板：清空内置风格选择（模板本身是完整视觉系统）；取消则恢复 auto
+                  if (next) setPrefs({ ...prefs, style: "auto", odStyle: "" });
+                  else setPrefs((p) => ({ ...p, style: "auto" }));
+                }}
+                className={`relative shrink-0 w-20 h-24 rounded-lg overflow-hidden border-2 transition-all ${
+                  selectedTemplateId === t.id ? "border-brand ring-2 ring-brand/20" : "border-border hover:border-gray-300"
+                }`}
+                title={t.id}
+              >
+                {t.thumb ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={t.thumb} alt="模板" className="w-full h-full object-cover" loading="lazy" />
+                ) : (
+                  <span className="w-full h-full flex items-center justify-center text-xl text-gray-300">🎨</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* 已选择定制模板提示（对应"偏好设置-排版风格"提示） */}
+          {selectedTemplateId && (
+            <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-brand/10 border border-brand/30 text-brand text-xs font-medium">
+              <span>✅</span>
+              <span className="flex-1">已选择定制模板（排版风格将使用此模板，内置风格不再生效）</span>
+              <button onClick={() => { setSelectedTemplateId(""); setPrefs((p) => ({ ...p, style: "auto" })); }}
+                className="text-[11px] underline hover:text-brand-active">取消</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 排版风格 */}
+      <div>
+        <label className="block text-sm font-medium mb-3">排版风格</label>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+          {STYLE_OPTIONS.map((opt) => (
+            <button key={opt.value}
+              onClick={() => { setPrefs({ ...prefs, style: opt.value, odStyle: "" }); setSelectedTemplateId(""); }}
+              className={`relative p-3 rounded-xl text-left transition-all ${
+                prefs.style === opt.value && !prefs.odStyle ? "ring-2 ring-brand ring-offset-1" : "hover:ring-1 hover:ring-gray-300"
+              } ${opt.className}`}>
+              <div className="mb-2">{opt.preview}</div>
+              <p className="text-xs font-semibold">{opt.label}</p>
+              <p className="text-[10px] text-text-muted mt-0.5">{opt.desc}</p>
+            </button>
+          ))}
+        </div>
+        <details className="mt-3">
+          <summary className="text-xs text-text-muted cursor-pointer hover:text-brand py-1">+ 更多 Open Design 风格（29 种）</summary>
+          <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
+            {(() => {
+              const cats = [...new Set(OD_STYLES.map(od => od.category))];
+              return cats.map(cat => (
+                <div key={cat}>
+                  <p className="text-[10px] text-muted font-medium mb-1">{cat}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {OD_STYLES.filter(od => od.category === cat).map((od) => (
+                      <button key={od.value}
+                        onClick={() => { setPrefs({ ...prefs, odStyle: prefs.odStyle === od.value ? "" : od.value, style: prefs.odStyle === od.value ? prefs.style : "auto" }); setSelectedTemplateId(""); }}
+                        className={`px-2 py-0.5 rounded text-[10px] transition-all ${
+                          prefs.odStyle === od.value ? "bg-accent text-accent-on font-medium" : "bg-surface border border-border text-muted hover:border-accent/30 hover:text-fg"
+                        }`}>{od.label}</button>
+                    ))}
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        </details>
+      </div>
+    </>
+  );
 
   // ========== 渲染 ==========
 
@@ -544,9 +637,9 @@ export default function BuildPage() {
         {/* ===== 生成模式（并行入口，置于产品图片上方） ===== */}
         <div className="flex gap-2">
           {([
-            { v: "detail", label: "📄 详情页" },
+            { v: "detail", label: "📄 套图+Aplus" },
             { v: "single", label: "🖼️ 单图" },
-            { v: "expert", label: "🎯 专家模式" },
+            { v: "expert", label: "🎯【专家模式】套图+Aplus" },
           ] as const).map((m) => (
             <button key={m.v} onClick={() => setGenerationMode(m.v)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition ${
@@ -560,20 +653,20 @@ export default function BuildPage() {
         </div>
         <p className="text-xs text-text-muted -mt-3">
           {generationMode === "expert"
-            ? "专家模式与傻瓜式生成是两种并行模式：这里独立设置主产品图与同款多视角参考图，不使用下方的背面图/模特图/品类/偏好等傻瓜式字段。"
+            ? "【专家模式】套图+Aplus：主产品图 + 同款多视角参考图（每张可写提示词），并支持定制模板 / 排版风格。"
             : generationMode === "single"
-              ? "傻瓜式生成：上传产品图即可，只出 1 张场景图（不生成详情页 HTML）。"
-              : "傻瓜式生成：上传产品图即可自动完成全套 A+ 详情页，可批量入队。"}
+              ? "单图：只生成 1 张产品场景图，不生成详情页 HTML，无需定制模板 / 排版风格。"
+              : "套图+Aplus：上传产品图即可自动完成全套 A+ 详情页，可批量入队。"}
         </p>
 
         {generationMode === "expert" ? (
           <>{/* ===== 专家模式（全新独立页面逻辑） ===== */}
             <div className="p-4 bg-purple-50/60 border border-purple-100 rounded-xl">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold">🎯 专家模式</span>
+                <span className="text-sm font-semibold">🎯【专家模式】套图+Aplus</span>
                 <span className="text-[10px] text-text-muted font-normal">（同款多视角：主产品图 + 附加参考图，每张参考图可写提示词）</span>
               </div>
-              <p className="text-xs text-text-muted mt-1">与傻瓜式生成互不干扰：本页面只收集专家生成所需的主图与参考图，生成完整 A+ 详情页。产品主体（颜色/款式/结构）始终以主产品图为准。</p>
+              <p className="text-xs text-text-muted mt-1">主产品图确定产品主体（颜色/款式/结构），参考图补充同一款式的背面/细节/其他视角；同样生成完整 A+ 套图，可在下方选择定制模板 / 排版风格。</p>
             </div>
 
             {/* 专家：主产品图（必填） */}
@@ -645,6 +738,15 @@ export default function BuildPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* 专家：定制模板 + 排版风格（专家模式也是套图+Aplus，支持排版） */}
+            <div className="p-4 bg-gray-50 rounded-xl space-y-5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold">🎨 排版偏好</span>
+                <span className="text-[10px] text-text-muted font-normal">（可选，定制模板 / 排版风格）</span>
+              </div>
+              {renderTemplateAndStylePrefs()}
             </div>
 
             {/* 专家：可选命名信息 */}
@@ -860,86 +962,12 @@ export default function BuildPage() {
           </button>
           {showPrefs && (
             <div className="mt-4 space-y-5 p-5 bg-gray-50 rounded-xl">
-              {/* 定制模板（复刻产出，直接选用） */}
-              {templates.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium mb-1">定制模板 <span className="text-[10px] text-muted font-normal">（复刻的风格模板，选中后覆盖排版风格）</span></label>
-                  <p className="text-[10px] text-text-muted mb-2">在"产出中心 → 风格模板"可预览和管理模板。</p>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {templates.map((t) => (
-                      <button key={t.id}
-                        onClick={() => {
-                          const next = selectedTemplateId === t.id ? "" : t.id;
-                          setSelectedTemplateId(next);
-                          // 选模板：清空内置风格选择（模板本身是完整视觉系统）；取消则恢复 auto
-                          if (next) setPrefs({ ...prefs, style: "auto", odStyle: "" });
-                          else setPrefs((p) => ({ ...p, style: "auto" }));
-                        }}
-                        className={`relative shrink-0 w-20 h-24 rounded-lg overflow-hidden border-2 transition-all ${
-                          selectedTemplateId === t.id ? "border-brand ring-2 ring-brand/20" : "border-border hover:border-gray-300"
-                        }`}
-                        title={t.id}
-                      >
-                        {t.thumb ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={t.thumb} alt="模板" className="w-full h-full object-cover" loading="lazy" />
-                        ) : (
-                          <span className="w-full h-full flex items-center justify-center text-xl text-gray-300">🎨</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* 已选择定制模板提示（对应"偏好设置-排版风格"提示） */}
-                  {selectedTemplateId && (
-                    <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-brand/10 border border-brand/30 text-brand text-xs font-medium">
-                      <span>✅</span>
-                      <span className="flex-1">已选择定制模板（排版风格将使用此模板，内置风格不再生效）</span>
-                      <button onClick={() => { setSelectedTemplateId(""); setPrefs((p) => ({ ...p, style: "auto" })); }}
-                        className="text-[11px] underline hover:text-brand-active">取消</button>
-                    </div>
-                  )}
-                </div>
+              {generationMode === "single" && (
+                <p className="text-[11px] text-text-muted">单图模式只需要出图，不涉及排版，这里仅保留模特偏好。</p>
               )}
+              {/* 定制模板 + 排版风格：仅套图+Aplus（detail）显示；单图不需要排版信息 */}
+              {generationMode !== "single" && renderTemplateAndStylePrefs()}
 
-              <div>
-                <label className="block text-sm font-medium mb-3">排版风格</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
-                  {STYLE_OPTIONS.map((opt) => (
-                    <button key={opt.value}
-                      onClick={() => { setPrefs({ ...prefs, style: opt.value, odStyle: "" }); setSelectedTemplateId(""); }}
-                      className={`relative p-3 rounded-xl text-left transition-all ${
-                        prefs.style === opt.value && !prefs.odStyle ? "ring-2 ring-brand ring-offset-1" : "hover:ring-1 hover:ring-gray-300"
-                      } ${opt.className}`}>
-                      <div className="mb-2">{opt.preview}</div>
-                      <p className="text-xs font-semibold">{opt.label}</p>
-                      <p className="text-[10px] text-text-muted mt-0.5">{opt.desc}</p>
-                    </button>
-                  ))}
-                </div>
-                <details className="mt-3">
-                  <summary className="text-xs text-text-muted cursor-pointer hover:text-brand py-1">+ 更多 Open Design 风格（29 种）</summary>
-                  <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
-                    {(() => {
-                      const cats = [...new Set(OD_STYLES.map(od => od.category))];
-                      return cats.map(cat => (
-                        <div key={cat}>
-                          <p className="text-[10px] text-muted font-medium mb-1">{cat}</p>
-                          <div className="flex flex-wrap gap-1">
-                            {OD_STYLES.filter(od => od.category === cat).map((od) => (
-                              <button key={od.value}
-                                onClick={() => { setPrefs({ ...prefs, odStyle: prefs.odStyle === od.value ? "" : od.value, style: prefs.odStyle === od.value ? prefs.style : "auto" }); setSelectedTemplateId(""); }}
-                                className={`px-2 py-0.5 rounded text-[10px] transition-all ${
-                                  prefs.odStyle === od.value ? "bg-accent text-accent-on font-medium" : "bg-surface border border-border text-muted hover:border-accent/30 hover:text-fg"
-                                }`}>{od.label}</button>
-                            ))}
-                          </div>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </details>
-              </div>
               <div>
                 <label className="block text-sm font-medium mb-3">模特偏好</label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
