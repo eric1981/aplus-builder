@@ -38,6 +38,15 @@ export default function TemplateGallery() {
 
   useEffect(() => { load(); }, [load]);
 
+  // 首次加载后：若存在无缩略图的模板（后端刚触发懒生成截图），6 秒后自动刷新拿缩略图
+  useEffect(() => {
+    if (!loaded) return;
+    const hasMissing = templates.some((t) => !t.thumb);
+    if (!hasMissing) return;
+    const timer = setTimeout(() => { load(); }, 6000);
+    return () => clearTimeout(timer);
+  }, [loaded, templates, load]);
+
   const openPreview = async (t: TemplateInfo) => {
     try {
       const r = await apiFetch(`/api/style-extract/templates?content=${encodeURIComponent(t.id)}`);

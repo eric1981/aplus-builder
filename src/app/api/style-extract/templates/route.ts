@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { listVisibleTemplates, deleteTemplate, TEMPLATES_DIR } from "@/lib/style-templates";
+import { listVisibleTemplates, deleteTemplate, ensureThumbnail, TEMPLATES_DIR } from "@/lib/style-templates";
+
+// 模块级去重：避免并发请求重复触发同一模板截图
+const thumbPending = new Set<string>();
+const MAX_LAZY_PER_REQUEST = 4;
 
 /**
  * 风格模板列表（按当前用户可见：本人复刻 + admin 的；admin 可见全部）
@@ -32,6 +36,17 @@ export async function GET(request: NextRequest) {
       ownerId: t.ownerId,
       createdAt: t.createdAt,
     }));
+
+    // 懒生成缩略图：无缩略图且模板文件在 → 后台补截图（不阻塞响应，刷新后可见）
+    const missing = list.filter((t) => !t.thumb && existsSync(join(TEMPLATES_DIR, `${t.id}.html`)));
+    for (const t of missing.slice(0, MAX_LAZY_PER_REQUEST)) {
+      if (thumbPending.has(t.id)) continue;
+      thumbPending.add(t.id);
+      ensureThumbnail(t.id)
+        .catch(() => {})
+        .finally(() => thumbPending.delete(t.id));
+    }
+
     return NextResponse.json({ templates: list });
   } catch {
     return NextResponse.json({ templates: [] });
