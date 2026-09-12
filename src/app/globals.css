@@ -149,6 +149,14 @@ input:focus, textarea:focus, select:focus {
 }
 .amz-navbar a { color: #fff; text-decoration: none; }
 .amz-navbar a:hover { color: var(--accent-light); }
+/* 导航高亮项（如「生成」）：与品牌首字（--accent）同色并加粗。
+   用 a.nav-accent 提高选择器权重，压过上面的 .amz-navbar a{color:#fff} */
+.amz-navbar a.nav-accent { color: var(--accent); font-weight: 700; }
+.amz-navbar a.nav-accent:hover { color: var(--accent-light); }
+/* 积分余额（右侧账号区） */
+.amz-navbar .nav-credits { color: #d1d5db; }
+.amz-navbar a.nav-credits:hover { color: var(--accent-light); }
+.amz-navbar .nav-credits-low { color: #fca5a5; }
 
 /* 页脚：深藏青 */
 .amz-footer {

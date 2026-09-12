@@ -695,8 +695,6 @@ export default function OutputPage() {
             <h1 className="text-base sm:text-lg font-semibold tracking-tight">产出中心</h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <a href="/customers" className="text-xs text-muted hover:text-accent font-medium">👤 客户</a>
-            <a href="/billing" className="text-xs text-muted hover:text-accent font-medium">💰 充值</a>
             <a href="/build" className="text-xs bg-accent text-accent-on px-2.5 py-1 rounded-md font-medium hover:bg-accent-active transition-colors">✚ 新建</a>
           </div>
         </div>

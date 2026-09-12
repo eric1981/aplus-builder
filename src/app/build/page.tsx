@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getHistory } from "../../lib/history";
 import { apiFetch } from "../../lib/apiFetch";
+import { refreshAuth } from "../../lib/auth-client";
 import { STYLE_OPTIONS, OD_STYLES, MODEL_OPTIONS, type BuiltinStyle, type ModelPref } from "../../lib/preference-constants";
 
 const STORAGE_KEY = "aplus-builder-state";
@@ -149,7 +150,6 @@ export default function BuildPage() {
   const [expertName, setExpertName] = useState("");
   const [expertDesc, setExpertDesc] = useState("");
   const [expertRefs, setExpertRefs] = useState<{ id: string; file: File; dataUrl: string; note: string }[]>([]);
-  const [credits, setCredits] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
 
@@ -168,16 +168,8 @@ export default function BuildPage() {
   const expertFileRef = useRef<HTMLInputElement>(null);
   const expertMainFileRef = useRef<HTMLInputElement>(null);
 
-  // 从后端读真实积分余额（扣减在服务端做，前端只展示）
-  const refreshCredits = async () => {
-    try {
-      const r = await apiFetch("/api/auth/me");
-      if (r.ok) {
-        const d = await r.json();
-        if (typeof d?.user?.credits === "number") setCredits(d.user.credits);
-      }
-    } catch {}
-  };
+  // 余额统一由顶部导航（AmazonNav）展示，这里只通知它刷新
+  const refreshCredits = () => refreshAuth();
 
   // 计算
   const runningCount = queueItems.filter((q) => q.status === "running" || q.status === "queued").length;
@@ -590,11 +582,6 @@ export default function BuildPage() {
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <a href="/customers" className="text-xs text-muted hover:text-accent font-medium">👤 客户</a>
-            <a href="/output" className="text-xs text-muted hover:text-accent font-medium">📋 产出</a>
-            <a href="/style-extract" className="text-xs text-muted hover:text-accent font-medium">🎨 复刻</a>
-            <a href="/billing" className="text-xs text-muted hover:text-accent font-medium" title="充值 / 账单">💰 充值</a>
-            <a href="/billing" className={`text-[10px] sm:text-xs font-medium hover:underline ${credits <= 2 ? "text-red-500" : credits <= 5 ? "text-orange-500" : "text-text-muted"}`} title="点击充值 / 查看账单">{credits}积分</a>
           </div>
         </div>
       </header>
