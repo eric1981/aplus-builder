@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { getHistory, loadOutput, outputImageUrl, type HistoryEntry, type LoadedOutput } from "../../lib/history";
 import TemplateGallery from "../../components/TemplateGallery";
 import { apiFetch } from "../../lib/apiFetch";
+import { useAuth } from "../../lib/auth-client";
 
 const STORAGE_KEY = "aplus-builder-state";
 const POLL_INTERVAL = 3000;
@@ -313,6 +314,7 @@ function formatTime(ts: number): string {
 const POLL_STATUSES = new Set(["running", "queued"]);
 
 export default function OutputPage() {
+  const { user } = useAuth();
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
@@ -789,8 +791,11 @@ export default function OutputPage() {
                     className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all ${rating === "disliked" ? "bg-red-100 text-red-500 scale-110" : "bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500"}`}>👎</button>
                 </div>
                 <button onClick={handleDownloadHtml} className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">⬇ HTML</button>
-                <button onClick={captureGallery} disabled={capturing}
-                  className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-purple-50 hover:border-purple-200 hover:text-purple-600 transition-colors disabled:opacity-50">{capturing ? "⏳" : "📸"} 画廊</button>
+                {user?.role === "admin" && (
+                  <button onClick={captureGallery} disabled={capturing}
+                    title="重建品牌画廊样张（仅管理员）"
+                    className="px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-purple-50 hover:border-purple-200 hover:text-purple-600 transition-colors disabled:opacity-50">{capturing ? "⏳" : "📸"} 画廊</button>
+                )}
                 {(preview.images?.length || 0) > 0 && (
                   downloadProgress > 0 ? (
                     <div className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium flex items-center gap-2">

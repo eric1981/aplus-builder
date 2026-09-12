@@ -75,11 +75,19 @@ export function proxy(request: NextRequest) {
   const isLocal = LOCAL_HOSTNAMES.has(
     extractHostname(request.headers.get("host") || ""),
   );
-  // 本机免登录豁免（settings.trustLocalhost，默认关闭 = 严格模式：本机也要求登录）。
-  // 豁免开启且未登出时，本机视为 admin；登出标记存在时仍需真实登录。
+  // 本机免登录豁免（默认关闭）。安全 H2：Host 头由客户端可控，仅凭它判断"本机"
+  // 等于给公网留后门（发 Host: localhost 即成为 admin）。因此额外要求：
+  //   ① 环境变量 ALLOW_LOCALHOST_ADMIN=1 —— 必须有主机访问权才能设置，
+  //      光靠管理后台的开关（DB）不足以开启；
+  //   ② 未携带 x-real-ip（反代/隧道通常会写该头）→ 视为经过转发，不算本机；
+  //   ③ 未点过登出。
+  // 注意：Next 会自行注入 x-forwarded-for（等于对端地址），因此**不能**用它的存在性
+  // 当反代信号；且若隧道与本站同机，远端请求也可能呈现为本机 —— 公网可达的部署请勿开启。
   const localExempt =
     isLocal &&
     getSettingBool("trustLocalhost") &&
+    process.env.ALLOW_LOCALHOST_ADMIN === "1" &&
+    !request.headers.get("x-real-ip") &&
     !request.cookies.get(LOGOUT_COOKIE);
 
   // 产出文件（图片 / HTML / 清单）：默认必须登录，并按用户目录隔离。

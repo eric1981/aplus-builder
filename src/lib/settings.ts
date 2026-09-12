@@ -43,6 +43,7 @@ export const SETTING_DEFS: SettingDef[] = [
   { key: "maxScreenshotConcurrent", label: "Chrome 截图并发上限", group: "concurrency", type: "number", env: "MAX_SCREENSHOT_CONCURRENT", default: 2, unit: "个" },
   { key: "maxAnalysisConcurrent", label: "市场分析并发上限", group: "concurrency", type: "number", env: "MAX_ANALYSIS_CONCURRENT", default: 2, unit: "个", description: "与生图并行，不占生成队列" },
   { key: "rateLimitPerMinute", label: "昂贵接口每分钟限次", group: "concurrency", type: "number", env: "RATE_LIMIT_PER_MINUTE", default: 30, unit: "次/分", description: "生成/风格复刻/截图等接口的限流" },
+  { key: "trustedProxyHops", label: "受信代理跳数（限流取真实 IP）", group: "concurrency", type: "number", env: "TRUSTED_PROXY_HOPS", default: 0, unit: "跳", description: "0=不信任 X-Forwarded-For（取最后一跳）；若前置 nginx/隧道追加了真实 IP，填代理层数" },
   // Agent
   { key: "agentSource", label: "Agent 联网（--source web）", group: "agent", type: "boolean", env: "AGENT_SOURCE", default: true, description: "关闭后 agent 不联网抓取" },
   { key: "agentTimeoutMinutes", label: "生图 Agent 超时", group: "agent", type: "number", env: "AGENT_TIMEOUT_MINUTES", default: 20, unit: "分钟" },
@@ -51,7 +52,7 @@ export const SETTING_DEFS: SettingDef[] = [
   // 上传
   { key: "maxUploadMb", label: "单文件上传上限", group: "upload", type: "number", env: "MAX_UPLOAD_MB", default: 15, unit: "MB" },
   // 登录与安全
-  { key: "trustLocalhost", label: "本机免登录（localhost = admin）", group: "auth", type: "boolean", env: "TRUST_LOCALHOST", default: false, description: "默认关闭：本机也要求登录，可完整测试登录系统；开启后本机免登录" },
+  { key: "trustLocalhost", label: "本机免登录（localhost = admin）", group: "auth", type: "boolean", env: "TRUST_LOCALHOST", default: false, description: "仅本地开发用，且需同时设置环境变量 ALLOW_LOCALHOST_ADMIN=1；开启后未登出且未经代理转发的本机请求视为 admin（Host 头本身可伪造，切勿在公网部署开启）" },
   // 系统（部署级，仅环境变量生效，后台只读展示）
   { key: "outputBase", label: "产出根目录 OUTPUT_BASE", group: "system", type: "select", options: [], env: "OUTPUT_BASE", default: "", restartRequired: true, description: "部署级路径，仅环境变量生效" },
   { key: "agentHome", label: "Agent 工作目录 AGENT_HOME", group: "system", type: "select", options: [], env: "AGENT_HOME", default: "", restartRequired: true, description: "部署级路径，仅环境变量生效" },
@@ -61,6 +62,14 @@ export const SETTING_DEFS: SettingDef[] = [
 const SETTING_MAP = new Map(SETTING_DEFS.map((d) => [d.key, d]));
 
 let cache: Record<string, string> | null = null;
+let cacheAt = 0;
+/**
+ * 设置缓存 TTL。
+ * proxy（中间件 bundle）与各路由 bundle 是**独立模块实例**，各自持有一份缓存，
+ * setSetting 只能失效当前实例的缓存 —— 若不设 TTL，管理后台改设置后 proxy 会一直
+ * 用旧值直到进程重启（例如关闭"本机免登录"却不生效）。5 秒 TTL 让跨实例改动尽快收敛。
+ */
+const CACHE_TTL_MS = 5_000;
 
 function ensureTable() {
   db.exec(`CREATE TABLE IF NOT EXISTS settings (
@@ -71,7 +80,7 @@ function ensureTable() {
 }
 
 function loadAll(): Record<string, string> {
-  if (cache) return cache;
+  if (cache && Date.now() - cacheAt < CACHE_TTL_MS) return cache;
   try {
     const rows = db
       .prepare(`SELECT key, value FROM settings`)
@@ -80,11 +89,13 @@ function loadAll(): Record<string, string> {
   } catch {
     cache = {};
   }
+  cacheAt = Date.now();
   return cache;
 }
 
 export function invalidateSettings() {
   cache = null;
+  cacheAt = 0;
 }
 
 /** 读取原始字符串值：DB > 环境变量 > 默认 */
@@ -102,9 +113,17 @@ export function getSettingInt(key: string, fallback = 0): number {
   return Number.isFinite(v) ? v : fallback;
 }
 
+/**
+ * 布尔解析（安全 H2）：严格白名单。
+ * 此前是「不等于 false/0/none/no 即为 true」—— 写入空串或任意脏值都会**变成 true**，
+ * 例如 `PUT {"trustLocalhost":""}` 就能开启本机免登录。现在无法识别的值一律回落该设置的默认值。
+ */
 export function getSettingBool(key: string): boolean {
-  const v = getSetting(key).toLowerCase();
-  return !(v === "false" || v === "0" || v === "none" || v === "no");
+  const v = getSetting(key).trim().toLowerCase();
+  if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
+  if (v === "false" || v === "0" || v === "no" || v === "off" || v === "") return false;
+  const def = SETTING_MAP.get(key);
+  return def ? Boolean(def.default) : false;
 }
 
 /** 写入设置（DB + 缓存失效） */

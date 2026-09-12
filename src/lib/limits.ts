@@ -126,13 +126,16 @@ export function getUserQuotaUsage(userId: string): { daily: number; monthly: num
 
 const rateHits = new Map<string, number[]>();
 
-/** 检查并记录一次调用；返回 false 表示超限（HTTP 429） */
-export function checkRateLimit(key: string): boolean {
+/** 检查并记录一次调用；返回 false 表示超限（HTTP 429）。limitOverride 用于更严格的场景（如按账号限登录） */
+export function checkRateLimit(key: string, limitOverride?: number): boolean {
   if (!key) return true;
   const now = Date.now();
   const windowStart = now - 60_000;
   const hits = (rateHits.get(key) || []).filter((t) => t > windowStart);
-  const limit = getSettingInt("rateLimitPerMinute", 30) || 1;
+  const limit = Math.max(
+    1,
+    limitOverride ?? (getSettingInt("rateLimitPerMinute", 30) || 1),
+  );
   if (hits.length >= limit) {
     rateHits.set(key, hits);
     return false;
@@ -143,12 +146,30 @@ export function checkRateLimit(key: string): boolean {
 }
 
 /**
- * 从请求中提取限流 key：
- * - 优先取 x-forwarded-for（反代/隧道后第一个 IP）
- * - 无则退化为 Host（此时限流退化为全局限制，仍能起到成本保护作用）
+ * 从请求中提取限流身份（安全 H1）。
+ *
+ * 此前取 `x-forwarded-for` 的**第一个**值 —— 该头客户端可控，轮换它即可完全绕过
+ * 限流（登录爆破、生图成本保护、截图限流全部失效）。现在：
+ *  - 配置 `trustedProxyHops=N`（默认 0）时，取「从右往左第 N 跳」——
+ *    右边几跳由受信代理追加，客户端伪造不到；
+ *  - 未配置时取**最后一个**值（紧邻我们的那一跳），仍比首位可信得多；
+ *  - 无 XFF 时退回 x-real-ip，再退回 Host。
+ *
+ * 注意：若前面没有受信代理，同一 Host 下的用户会共用一个计数器
+ * （退化为更严格的全局限流，宁可误伤也不放行）。
  */
 export function clientIp(headers: Headers): string {
+  const hops = getSettingInt("trustedProxyHops", 0);
   const fwd = headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0].trim() || "unknown";
+  if (fwd) {
+    const parts = fwd.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) {
+      const idx = hops > 0 ? Math.max(0, parts.length - hops) : parts.length - 1;
+      const ip = parts[idx];
+      if (ip) return ip;
+    }
+  }
+  const real = headers.get("x-real-ip");
+  if (real && real.trim()) return real.trim();
   return headers.get("host") || "unknown";
 }

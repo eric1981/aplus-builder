@@ -1,18 +1,15 @@
 /**
- * 前端 fetch 封装：自动附带 Bearer token（若配置了 NEXT_PUBLIC_AUTH_TOKEN）。
+ * 前端 fetch 封装。
  *
- * 服务端校验见 src/proxy.ts。配置方式：
- *   AUTH_TOKEN=xxx              （服务端）
- *   NEXT_PUBLIC_AUTH_TOKEN=xxx  （前端，与 AUTH_TOKEN 取相同值）
+ * 安全 P0-7：这里此前会读取 `NEXT_PUBLIC_AUTH_TOKEN` 并自动附带
+ * `Authorization: Bearer <token>`。但 `NEXT_PUBLIC_*` 会被编译进浏览器 JS bundle，
+ * 而 proxy 中该 token 等价 admin —— 等于把管理员凭据公开发布给所有访客。
+ * 该通道已移除：浏览器侧一律走会话 Cookie（HttpOnly），
+ * 脚本/服务端调用请直接用 `Authorization: Bearer <AUTH_USERS 中的 token>` 自行发请求。
  */
-const TOKEN =
-  typeof process !== "undefined" ? process.env.NEXT_PUBLIC_AUTH_TOKEN : undefined;
-
 export function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  const headers = new Headers(init?.headers);
-  if (TOKEN) headers.set("Authorization", `Bearer ${TOKEN}`);
-  return fetch(input, { ...init, headers });
+  return fetch(input, init);
 }
