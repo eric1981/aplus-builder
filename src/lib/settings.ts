@@ -15,6 +15,8 @@ export interface SettingDef {
   label: string;
   group: "quota" | "concurrency" | "agent" | "upload" | "system" | "auth" | "credits";
   type: "number" | "boolean" | "select";
+  /** 数字输入的步进（如单价支持 0.01） */
+  step?: number;
   options?: string[];
   env?: string;
   /** 默认值 */
@@ -35,7 +37,7 @@ export const SETTING_DEFS: SettingDef[] = [
   { key: "newUserCredits", label: "新用户初始积分", group: "credits", type: "number", default: 20, unit: "分", description: "注册/创建用户时发放的初始积分" },
   { key: "refundOnFailure", label: "失败自动退积分", group: "credits", type: "boolean", default: true, description: "任务失败/超时/取消时，自动退还该任务实际消耗的积分（幂等，同一任务只退一次）" },
   // 支付/充值（金额单位：分）
-  { key: "creditPriceCents", label: "积分单价", group: "credits", type: "number", default: 100, unit: "分/积分", description: "下单时据此折算金额（默认 100 分 = 1 元/积分）" },
+  { key: "creditPriceYuan", label: "积分单价", group: "credits", type: "number", default: 1, unit: "元/积分", step: 0.01, description: "客户充值时的售价：默认 1 元/积分（填 0.8 即 ¥0.8/积分）。金额 = 积分数 × 单价，历史订单不受改价影响" },
   { key: "minTopupCredits", label: "最低起充积分", group: "credits", type: "number", default: 10, unit: "积分", description: "低于该数量的充值单会被拒绝" },
   { key: "paymentProvider", label: "支付通道", group: "credits", type: "select", options: ["manual", "wechat", "alipay", "stripe", "generic"], default: "manual", description: "manual=线下/人工确认；其余对接对应通道的回调" },
   { key: "agentCommissionPercent", label: "代理分成比例", group: "credits", type: "number", default: 10, unit: "%", description: "代理从其名下客户消耗积分中分成的百分比（暂为记账，不结算）" },
@@ -114,6 +116,14 @@ export function getSetting(key: string): string {
 
 export function getSettingInt(key: string, fallback = 0): number {
   const v = parseInt(getSetting(key), 10);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+/** 读取小数设置（如积分单价 0.8 元）；空值/非数字回落到 fallback */
+export function getSettingNumber(key: string, fallback = 0): number {
+  const raw = getSetting(key).trim();
+  if (raw === "") return fallback;
+  const v = Number(raw);
   return Number.isFinite(v) ? v : fallback;
 }
 

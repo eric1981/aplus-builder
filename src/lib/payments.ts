@@ -18,7 +18,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { db, withTx } from "@/lib/db";
 import { addCredits, consumeCredits, getCreditBalance, grantCreditsInTx } from "@/lib/credits";
-import { getSettingInt } from "@/lib/settings";
+import { getSettingInt, getSettingNumber } from "@/lib/settings";
 
 export type OrderStatus = "pending" | "paid" | "refunded" | "canceled";
 
@@ -54,10 +54,18 @@ function toOrder(row: Record<string, unknown>): Order {
   };
 }
 
-/** 按积分数量与单价（settings.creditPriceCents，单位：分/积分）算出金额 */
+/**
+ * 积分单价（元/积分，settings.creditPriceYuan，可填小数如 0.8）。
+ * 以「元」为配置口径（直观），内部金额一律按「分」计算。
+ */
+export function creditPriceYuan(): number {
+  const v = getSettingNumber("creditPriceYuan", 1);
+  return v >= 0 && v <= 10_000 ? v : 1;
+}
+
+/** 按积分数量与单价算出金额（分） */
 export function priceForCredits(credits: number): number {
-  const unit = Math.max(0, getSettingInt("creditPriceCents", 100));
-  return Math.max(0, Math.trunc(credits)) * unit;
+  return Math.round(Math.max(0, Math.trunc(credits)) * creditPriceYuan() * 100);
 }
 
 export function newOrderId(): string {

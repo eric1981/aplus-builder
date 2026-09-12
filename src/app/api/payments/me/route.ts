@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createOrder, listOrders, priceForCredits } from "@/lib/payments";
+import { createOrder, listOrders, priceForCredits, creditPriceYuan } from "@/lib/payments";
 import { getCreditBalance } from "@/lib/credits";
 import { getSetting, getSettingInt } from "@/lib/settings";
 import { getUserById } from "@/lib/users";
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
   return NextResponse.json({
     balance: getCreditBalance(userId),
-    creditPriceCents: getSettingInt("creditPriceCents", 100),
+    creditPriceYuan: creditPriceYuan(),
     minTopupCredits: getSettingInt("minTopupCredits", 10),
     provider: getSetting("paymentProvider") || "manual",
     orders: listOrders({ userId, limit: 50 }),
@@ -42,11 +42,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "用户不存在，请先登录后再充值" }, { status: 404 });
   }
 
-  const unit = Math.max(1, getSettingInt("creditPriceCents", 100));
+  const unitCents = Math.max(1, priceForCredits(1)); // 1 积分的价格（分），用于按金额反推积分数
   const minCredits = Math.max(1, getSettingInt("minTopupCredits", 10));
   let credits = Number.isFinite(body.credits as number) ? Math.trunc(body.credits as number) : 0;
   if (!credits && Number.isFinite(body.amountCents as number)) {
-    credits = Math.floor(Math.trunc(body.amountCents as number) / unit);
+    credits = Math.floor(Math.trunc(body.amountCents as number) / unitCents);
   }
   if (credits < minCredits) {
     return NextResponse.json(

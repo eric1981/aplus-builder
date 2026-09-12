@@ -22,7 +22,8 @@ interface Order {
 
 interface BillingData {
   balance: number;
-  creditPriceCents: number;
+  /** 积分单价（元/积分，可含小数，如 0.8） */
+  creditPriceYuan: number;
   minTopupCredits: number;
   provider: string;
   orders: Order[];
@@ -61,8 +62,11 @@ export default function BillingPage() {
     load();
   }, [loading, user, load, router]);
 
-  const unitYuan = ((data?.creditPriceCents ?? 100) / 100).toFixed(2);
-  const totalYuan = ((credits * (data?.creditPriceCents ?? 100)) / 100).toFixed(2);
+  const unit = data?.creditPriceYuan ?? 1;
+  /** ¥1 / ¥0.8 / ¥1.25 —— 整数不带小数尾巴，更好读 */
+  const fmtUnit = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, ""));
+  const unitYuan = fmtUnit(unit);
+  const totalYuan = (credits * unit).toFixed(2);
 
   const createOrder = async () => {
     setMsg(null);

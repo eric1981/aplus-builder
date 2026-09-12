@@ -27,6 +27,8 @@ interface SettingItem {
   label: string;
   group: string;
   type: "number" | "boolean" | "select";
+  /** 数字输入步进（如积分单价支持 0.01） */
+  step?: number;
   options?: string[];
   env?: string;
   default: string | number | boolean;
@@ -520,6 +522,7 @@ export default function AdminPage() {
                             <input
                               type="number"
                               value={s.value}
+                              step={s.step ?? 1}
                               min={group === "concurrency" ? 1 : 0}
                               onChange={(e) => setSettingValue(s.key, e.target.value)}
                               className="w-24 px-2 py-1 border border-border rounded-lg text-sm"

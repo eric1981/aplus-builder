@@ -46,6 +46,11 @@ export async function PUT(request: NextRequest) {
         errors.push(`${def.label} 必须在 0–100 之间`);
         continue;
       }
+      // 积分单价上限（与运行时夹取口径一致，避免"设置里写着 20000、实际按 1 元算"）
+      if (def.key === "creditPriceYuan" && n > 10_000) {
+        errors.push(`${def.label} 不能超过 10000 元/积分`);
+        continue;
+      }
       // 防止误设 0 导致全局不可用（并发/超时类至少为 1）
       if (def.group === "concurrency" || def.key === "agentTimeoutMinutes" || def.key === "styleTimeoutMinutes") {
         if (n < 1) {
@@ -62,9 +67,11 @@ export async function PUT(request: NextRequest) {
     logAudit(admin.id, "admin.settings_update", { keys: updated });
   }
   if (errors.length > 0) {
+    // 全都没写进去 → 400（此前误写成 errors.length === updated.length，导致单键校验失败也返回 200，
+    // 前端拿不到错误提示）；部分写入 → 200 并把 errors 一并回传。
     return NextResponse.json(
       { ok: updated.length > 0, updated, errors },
-      { status: errors.length === updated.length ? 400 : 200 },
+      { status: updated.length === 0 ? 400 : 200 },
     );
   }
   return NextResponse.json({ ok: true, updated });
