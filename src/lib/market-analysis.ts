@@ -7,7 +7,7 @@
 import { spawn } from "child_process";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, appendFileSync } from "fs";
 import { join } from "path";
-import { getAgentHome } from "./config";
+import { agentEnv, shq, resolveAgentWorkDir, resolveHermesBin, DATA_BOUNDARY_RULE } from "./agent-runtime";
 import { getSettingInt } from "./settings";
 
 export interface MarketPrediction {
@@ -57,17 +57,20 @@ function runJob(job: AnalysisJob) {
   const script = [
     `#!/bin/bash`,
     `set -eo pipefail`,
-    `cd ${getAgentHome()}`,
-    `hermes -p duma -s ecommerce-market-analysis chat \\`,
+    `cd ${shq(resolveAgentWorkDir())}`,
+    `${shq(resolveHermesBin())} -p duma -s ecommerce-market-analysis chat \\`,
     `  -q "$(cat '${inputFile}')" \\`,
     `  --quiet --yolo --max-turns 30 --source web`,
+    ``,
+    `【重要规则】`,
+    DATA_BOUNDARY_RULE,
   ].join("\n");
   writeFileSync(scriptPath, script, { mode: 0o755 });
 
   const child = spawn("/bin/bash", [scriptPath], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, HOME: getAgentHome() },
-    cwd: getAgentHome(),
+    env: agentEnv(),
+    cwd: resolveAgentWorkDir(),
   });
   child.stdout.on("data", (d: Buffer) => appendFileSync(logFile, d));
   child.stderr.on("data", (d: Buffer) => appendFileSync(logFile, d));

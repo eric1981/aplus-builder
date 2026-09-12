@@ -8,7 +8,11 @@ import { db } from "@/lib/db";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
 import { consumeCredits, creditCostFor, refundTaskCredits } from "@/lib/credits";
-import { getAgentHome, getAgentTimeoutMs, userBase } from "@/lib/config";
+import { getAgentTimeoutMs, userBase } from "@/lib/config";
+import {
+  agentEnv, shq, resolveAgentWorkDir, resolveHermesBin,
+  userDataBlock, userDataInline, DATA_BOUNDARY_RULE,
+} from "@/lib/agent-runtime";
 import { logAudit } from "@/lib/audit";
 import { screenshotPage } from "@/lib/screenshot";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
@@ -146,8 +150,9 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
 
   const child = spawn("/bin/bash", [scriptPath], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, HOME: getAgentHome() },
-    cwd: getAgentHome(),
+    // 最小环境变量白名单（只放行运行必需项，不把服务端 env 整包交给 agent）
+    env: agentEnv(),
+    cwd: resolveAgentWorkDir(),
   });
   children.set(taskId, child);
 
@@ -587,7 +592,7 @@ export async function POST(request: NextRequest) {
     }
 
     const descBlock = description.trim()
-      ? `\n产品信息：${description}\n`
+      ? `\n${userDataBlock("产品信息", description)}\n`
       : (mode === "single"
           ? "\n（用户未提供描述，请根据产品图自行分析品类、面料、风格并生成场景图）\n"
           : "\n（用户未提供描述，请根据产品图自行分析品类、面料、风格并生成详情页）\n");
@@ -605,9 +610,10 @@ export async function POST(request: NextRequest) {
         descBlock,
         ...(prefLines.length > 0 ? [`偏好参考：`, ...prefLines, ``] : []),
         ...(customerName ? [``, `【客户档案 — ${customerName}】`, `以下为该客户的特定要求，生成时必须遵守：`] : []),
-        ...(customerRequirements ? [`- 其他要求：${customerRequirements}`] : []),
+        ...(customerRequirements ? [userDataBlock("客户特殊要求", customerRequirements)] : []),
         ...(customerName ? [``] : []),
         `【重要规则】`,
+        DATA_BOUNDARY_RULE,
         `- 只生成一张场景图，把产品放到合适的场景中（例如咖啡厅、街头、工作室等）。`,
         `- 不要生成白底抠图、多角度图、详情页长图或多张场景图，就一张。`,
         `- 不要生成 HTML 详情页 —— 只出一张场景图。`,
@@ -632,7 +638,7 @@ export async function POST(request: NextRequest) {
               `【专家模式 · 同款多视角附加参考】`,
               `以下 ${expertRefs.length} 张图是与产品图同一款式的附加参考（视角/细节补充）。`,
               ...expertRefs.map((r, i) =>
-                `参考图 ${i + 1}：${r.path}${r.note ? ` —— 用户提示：${r.note}` : ""}`,
+                `参考图 ${i + 1}：${r.path}${r.note ? ` —— ${userDataInline("用户提示", r.note)}` : ""}`,
               ),
               `- 产品主体（颜色/款式/结构）始终以产品图 ${imgPath} 为准；附加参考只补充产品图未覆盖的视角与细节。`,
               `- 用户对某张附加参考的提示只描述该视角的观察要点或期望体现的细节，不得与产品图冲突；冲突时以产品图为准。`,
@@ -644,7 +650,7 @@ export async function POST(request: NextRequest) {
         ...(prefLines.length > 0 ? [`偏好参考：`, ...prefLines, ``] : []),
         ...(customerName ? [``, `【客户档案 — ${customerName}】`, `以下为该客户的特定要求，生成时必须遵守：`] : []),
         ...(customerSizeChart ? [`- 尺码表（CSV 格式，请解析并在详情页中正确展示）：\n${customerSizeChart}`] : []),
-        ...(customerRequirements ? [`- 其他要求：${customerRequirements}`] : []),
+        ...(customerRequirements ? [userDataBlock("客户特殊要求", customerRequirements)] : []),
         ...(customerName ? [``] : []),
         ...(customTemplateId ? [
           `【模板保护标记】`,
@@ -654,6 +660,7 @@ export async function POST(request: NextRequest) {
           ``
         ] : []),
         `【重要规则】`,
+        DATA_BOUNDARY_RULE,
         `- 不要使用 clarify 询问我任何问题，自己决定所有选择。`,
         `- ⛔ 严禁重命名、移动或删除任务目录（${workDir}）及其任何父级目录。`,
         `- 📍 进度报告：每个关键步骤（Vision 分析/每张图生成/HTML排版/QC/完成）执行时，`,
@@ -704,11 +711,13 @@ export async function POST(request: NextRequest) {
       writeFileSync(join(workDir, "input-meta.json"), JSON.stringify(inputMeta, null, 2), "utf-8");
     } catch {}
 
+    const workCwd = resolveAgentWorkDir();
+    const hermesBin = resolveHermesBin();
     const script = [
       `#!/bin/bash`,
       `set -eo pipefail`,
-      `cd /Users/eric`,
-      `hermes -p duma -s ecommerce-aplus-detail chat \\`,
+      `cd ${shq(workCwd)}`,
+      `${shq(hermesBin)} -p duma -s ecommerce-aplus-detail chat \\`,
       `  -q "$(cat '${promptFile}')" \\`,
       `  --quiet --yolo --max-turns 90${getSettingBool("agentSource") ? " --source web" : ""}`,
     ].join("\n");
@@ -774,9 +783,9 @@ export async function POST(request: NextRequest) {
       ``,
       `产品图：${imgPath}`,
       `品类：${category || "（未指定，请看图判断）"}`,
-      `产品描述：${description || "（未提供，请结合产品图推断）"}`,
+      ...(description.trim() ? [userDataBlock("产品描述", description)] : [`产品描述：（未提供，请结合产品图推断）`]),
       `风格参考：${styleLabel[uiPrefs.style || ""] || uiPrefs.style || "自动"}`,
-      ...(customerRequirements ? [`客户要求：${customerRequirements}`] : []),
+      ...(customerRequirements ? [userDataBlock("客户要求", customerRequirements)] : []),
       ``,
       `请按 ecommerce-market-analysis skill 的要求，联网调研后把预测 JSON 写入：`,
       join(workDir, "sales-prediction.json"),

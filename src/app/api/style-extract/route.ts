@@ -8,7 +8,11 @@ import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
 import { consumeCredits, creditCostFor, refundTaskCredits } from "@/lib/credits";
 import { onTemplateCreated, migrateLegacyTemplates } from "@/lib/style-templates";
-import { getAgentHome, getStyleTimeoutMs, OUTPUT_BASE } from "@/lib/config";
+import { getStyleTimeoutMs, OUTPUT_BASE } from "@/lib/config";
+import {
+  agentEnv, shq, resolveAgentWorkDir, resolveHermesBin,
+  userDataBlock, DATA_BOUNDARY_RULE,
+} from "@/lib/agent-runtime";
 import { logAudit } from "@/lib/audit";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
 
@@ -167,7 +171,7 @@ export async function POST(request: NextRequest) {
       ``,
       ...refLines,
       ``,
-      ...(requirements ? [`用户要求：${requirements}`] : []),
+      ...(requirements ? [userDataBlock("用户要求", requirements)] : []),
       ...(customerHint ? [customerHint] : []),
       ``,
       ...(isMulti
@@ -185,6 +189,7 @@ export async function POST(request: NextRequest) {
       `4. 将 HTML 文件保存到：${outputPath}`,
       ``,
       `【重要规则】`,
+      DATA_BOUNDARY_RULE,
       `- 不要使用 clarify 询问我任何问题`,
       `- HTML 必须内联所有 CSS（不要外部文件）`,
       `- 图片用相对路径引用（如 ./example.jpg），不要用 data: 或 http: URL`,
@@ -195,10 +200,13 @@ export async function POST(request: NextRequest) {
     writeFileSync(promptFile, prompt);
 
     // 写 run.sh
+    const workCwd2 = resolveAgentWorkDir();
+    const hermesBin2 = resolveHermesBin();
     const script = [
       `#!/bin/bash`,
-      `cd /Users/eric`,
-      `~/.hermes/hermes-agent/venv/bin/hermes -p duma -s aplus-style-creator chat \\`,
+      `set -eo pipefail`,
+      `cd ${shq(workCwd2)}`,
+      `${shq(hermesBin2)} -p duma -s aplus-style-creator chat \\`,
       `  -q "$(cat '${promptFile}')" \\`,
       `  --quiet --yolo --max-turns 60${getSettingBool("agentSource") ? " --source web" : ""}`,
     ].join("\n");
@@ -216,8 +224,8 @@ export async function POST(request: NextRequest) {
 
     const child = spawn("/bin/bash", [scriptPath], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HOME: getAgentHome() },
-      cwd: getAgentHome(),
+      env: agentEnv(),
+      cwd: resolveAgentWorkDir(),
     });
 
     child.stdout.on("data", (d: Buffer) => { logBuffer += d.toString(); appendFileSync(logFile, d); });
