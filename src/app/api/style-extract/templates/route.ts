@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { join, basename, resolve, sep } from "path";
 import { listVisibleTemplates, deleteTemplate, ensureThumbnail, TEMPLATES_DIR } from "@/lib/style-templates";
 
 // 模块级去重：避免并发请求重复触发同一模板截图
@@ -17,10 +17,18 @@ export async function GET(request: NextRequest) {
   const userId = request.headers.get("x-user-id") || "admin";
 
   // 预览内容：返回模板 HTML
+  // 安全 P0-2：此前直接把 contentId 拼进 join()，且不校验归属 ——
+  // 可用 "../.." 读任意 .html，或直接读他人模板。现改为：
+  //   ① 只认「当前用户可见」的模板 id；② 路径取自 DB 记录的 filename（不信任客户端）；③ resolve 前缀兜底。
   const contentId = request.nextUrl.searchParams.get("content");
   if (contentId) {
+    const tpl = listVisibleTemplates(userId).find((t) => t.id === contentId);
+    if (!tpl) return NextResponse.json({ error: "模板不存在" }, { status: 404 });
     try {
-      const p = join(TEMPLATES_DIR, `${contentId}.html`);
+      const p = resolve(join(TEMPLATES_DIR, basename(tpl.filename)));
+      if (!p.startsWith(resolve(TEMPLATES_DIR) + sep)) {
+        return NextResponse.json({ error: "非法路径" }, { status: 400 });
+      }
       if (!existsSync(p)) return NextResponse.json({ error: "模板不存在" }, { status: 404 });
       return NextResponse.json({ html: readFileSync(p, "utf-8") });
     } catch {
