@@ -1,8 +1,9 @@
 import { readdirSync, existsSync } from "fs";
-import { join, relative } from "path";
+import { join, relative, resolve, sep } from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getOutputBase } from "@/lib/config";
+import { signAssetPath } from "@/lib/asset-signing";
 
 /**
  * GET /api/hero-images?count=6
@@ -10,13 +11,18 @@ import { getOutputBase } from "@/lib/config";
  *
  * 安全：拉取范围由服务端环境变量 HERO_IMAGE_USER 控制（默认 admin），
  * 不接受前端指定 userId —— 避免把任意用户的产出公开到首页。
- * 返回的 URL 是相对 OUTPUT_BASE 的 /api/output 路径（逐段 encode）。
+ * 返回的 URL 是带 HMAC 签名的 /api/output 路径（逐段 encode）：
+ * /api/output 默认要求登录，首页是匿名页面，因此只有服务端签发的图才放行。
  */
 
-/** 产出图绝对路径 → /api/output URL（相对 OUTPUT_BASE，逐段 encode） */
+/** 产出图绝对路径 → 带签名的 /api/output URL；不在 OUTPUT_BASE 内则返回空串（丢弃） */
 function outputUrl(absPath: string): string {
-  const rel = relative(getOutputBase(), absPath);
-  return `/api/output/${rel.split("/").map(encodeURIComponent).join("/")}`;
+  const base = getOutputBase();
+  const resolved = resolve(absPath);
+  // 防越界：work_dir 来自 DB，可能是改过 outputBase 之前的历史绝对路径
+  if (!resolved.startsWith(base + sep)) return "";
+  const encoded = relative(base, resolved).split("/").map(encodeURIComponent).join("/");
+  return `/api/output/${encoded}?sig=${signAssetPath(encoded)}`;
 }
 
 /** 扫描任务目录，收集模特场景图（scene-01 等）；兼容 output/ 子目录与根目录结构 */
@@ -127,7 +133,7 @@ export async function GET(req: NextRequest) {
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
 
-    const images = pool.slice(0, count).map(outputUrl);
+    const images = pool.map(outputUrl).filter((u) => u.length > 0).slice(0, count);
     return NextResponse.json({ images });
   } catch {
     return NextResponse.json({ images: [] });

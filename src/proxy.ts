@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { findUserByToken } from "@/lib/users";
 import { getUserBySessionToken, SESSION_COOKIE, LOGOUT_COOKIE } from "@/lib/auth";
 import { getSettingBool } from "@/lib/settings";
+import { canonicalEncodedPath, verifyAssetPath } from "@/lib/asset-signing";
 
 /**
  * 全站 /api 认证闸门（Next.js 16 的 proxy 文件约定，替代旧版 middleware）。
@@ -81,11 +82,29 @@ export function proxy(request: NextRequest) {
     getSettingBool("trustLocalhost") &&
     !request.cookies.get(LOGOUT_COOKIE);
 
-  // iframe 预览加载产出图片（img 标签无法携带 Authorization 头）——免认证，
-  // 但会携带 Cookie，因此可带用户上下文实现按用户隔离
+  // 产出文件（图片 / HTML / 清单）：默认必须登录，并按用户目录隔离。
+  //
+  // 安全 P0-1：这里此前是「免认证 + 未登录回落 admin」，等于任何人都能读取
+  // OUTPUT_BASE 下所有租户的文件（产品原图、prompt.txt、input-meta.json…）。
+  // 现在未登录时只放行一种情况：服务端自己签发的公开图签名 URL
+  // （首页作品墙 /api/hero-images 返回的模特场景图），其余一律 401。
   if (pathname.startsWith("/api/output/")) {
     const user = resolveUser(request);
-    return allowAs(request, user?.userId || "admin");
+    if (user) return allowAs(request, user.userId);
+
+    const encodedPath = canonicalEncodedPath(pathname.slice("/api/output/".length));
+    const isPublicImage = /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(encodedPath);
+    if (isPublicImage && verifyAssetPath(encodedPath, request.nextUrl.searchParams.get("sig"))) {
+      // 签名有效：以公开图归属方（品牌方，默认 admin）身份读取
+      return allowAs(request, process.env.HERO_IMAGE_USER || "admin");
+    }
+
+    return withSecurityHeaders(
+      NextResponse.json(
+        { error: "Unauthorized: 请先登录（公开图需使用服务端签发的签名链接）" },
+        { status: 401 },
+      ),
+    );
   }
 
   // 首页悬浮模特图：随机取品牌方（HERO_IMAGE_USER，默认 admin）的公开产出，

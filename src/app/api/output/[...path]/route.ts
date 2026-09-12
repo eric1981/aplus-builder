@@ -55,11 +55,19 @@ export async function GET(
     json: "application/json",
   };
 
-  return new NextResponse(buf, {
-    headers: {
-      "Content-Type": mimeMap[ext] || "application/octet-stream",
-      "Cache-Control": "public, max-age=3600",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
+  const isHtmlLike = ext === "html" || ext === "htm";
+  const headers: Record<string, string> = {
+    "Content-Type": mimeMap[ext] || "application/octet-stream",
+    // private：避免共享缓存把某租户的产出缓存后直接回给未认证请求（绕过新鉴权）
+    "Cache-Control": "private, max-age=3600",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (isHtmlLike) {
+    // 安全 P0-1：产出 HTML 由 agent 依据用户输入生成，视为不可信内容。
+    // CSP sandbox 使其运行在不透明源中 —— 脚本仍可执行，但拿不到本应用 Cookie、
+    // 也调不到同源 /api/admin/*，从而切断"客户投毒 HTML → 管理员打开 → 提权"链路。
+    headers["Content-Security-Policy"] = "sandbox allow-scripts allow-popups allow-forms";
+  }
+
+  return new NextResponse(buf, { headers });
 }
