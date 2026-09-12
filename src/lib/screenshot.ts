@@ -4,6 +4,9 @@
  * - 全局并发限制（设置中心 maxScreenshotConcurrent，默认 2），截图任务排队执行
  */
 import { spawn } from "child_process";
+import { mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { getChromePath } from "./config";
 import { getSettingInt } from "./settings";
 
@@ -23,20 +26,42 @@ function maxConcurrent(): number {
 
 function run(job: ScreenshotJob): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(
-      getChromePath(),
-      [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-sandbox",
-        `--screenshot=${job.destPath}`,
-        "--window-size=450,800",
-        `file://${job.htmlPath}`,
-      ],
-      { stdio: "ignore", timeout: 15_000 },
-    );
-    child.on("error", () => resolve(false));
-    child.on("close", (code) => resolve(code === 0));
+    // 独立 profile 目录（修复实机截图失败）：
+    // 不给 --user-data-dir 时，headless Chrome 会尝试自动创建临时 profile 并失败
+    // （实测报 "Failed to create a unique user data directory for headless."），
+    // 导致画廊截图 / 模板缩略图全部失败；同时独立目录也避免与用户正在运行的
+    // Chrome 抢默认 profile、以及并发任务之间互相干扰。
+    let profileDir = "";
+    try {
+      profileDir = mkdtempSync(join(tmpdir(), "aplus-chrome-"));
+    } catch {}
+
+    const args = [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-sandbox",
+      ...(profileDir ? [`--user-data-dir=${profileDir}`] : []),
+      `--screenshot=${job.destPath}`,
+      "--window-size=450,800",
+      `file://${job.htmlPath}`,
+    ];
+
+    const cleanup = () => {
+      if (!profileDir) return;
+      try {
+        rmSync(profileDir, { recursive: true, force: true });
+      } catch {}
+    };
+
+    const child = spawn(getChromePath(), args, { stdio: "ignore", timeout: 15_000 });
+    child.on("error", () => {
+      cleanup();
+      resolve(false);
+    });
+    child.on("close", (code) => {
+      cleanup();
+      resolve(code === 0);
+    });
   });
 }
 
