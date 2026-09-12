@@ -158,7 +158,7 @@ export default function BuildPage() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
 
   // 复刻风格模板（本人 + admin 可见，build 可直接选用）
-  const [templates, setTemplates] = useState<{ id: string; thumb: string | null; ownerId: string }[]>([]);
+  const [templates, setTemplates] = useState<{ id: string; thumb: string | null; isPlatform?: boolean }[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);

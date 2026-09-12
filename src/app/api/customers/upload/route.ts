@@ -4,6 +4,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { logAudit } from "@/lib/audit";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "未知错误";
@@ -16,7 +17,8 @@ function errMsg(e: unknown): string {
  */
 export async function POST(request: NextRequest) {
   try {
-    const userId = request.headers.get("x-user-id") || "admin";
+    const userId = resolveCallerId(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
     const formData = await request.formData();
     // 前端把 id/type 放在 URL 查询参数、文件字段名为 logo/model；
     // 这里兼容两种来源（formData 字段名兼容旧调用）

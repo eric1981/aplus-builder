@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { taskStore } from "@/app/api/generate/task-store";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /**
  * GET /api/list-history
@@ -7,7 +8,8 @@ import { taskStore } from "@/app/api/generate/task-store";
  */
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.headers.get("x-user-id") || "admin";
+    const userId = resolveCallerId(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
     const entries = taskStore.listHistory(userId).map((t) => ({
       taskId: t.taskId,
       userId: t.userId,

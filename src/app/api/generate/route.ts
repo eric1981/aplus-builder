@@ -18,6 +18,7 @@ import { screenshotPage } from "@/lib/screenshot";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
 import { startMarketAnalysis, normalizePrediction, type MarketPrediction } from "@/lib/market-analysis";
 import { identifyProductName } from "@/lib/product-vision";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 function sanitizeProductName(description: string, taskId: string): string {
   const tid = taskId.slice(0, 8);
@@ -383,7 +384,8 @@ export async function POST(request: NextRequest) {
     let logoPath = "";
 
     // 多用户隔离：x-user-id 由 proxy 注入；无则视为 admin（本地默认布局）
-    const userId = request.headers.get("x-user-id") || "admin";
+    const userId = resolveCallerId(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
     const base = userBase(userId);
 
     // 先取 description 和 product_name 用于目录命名（vision 定名失败时的降级名）
@@ -853,7 +855,7 @@ export async function GET(request: NextRequest) {
   const task = tasks.get(taskId);
   if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
   // 归属校验：非本人（且非 admin）一律按"不存在"处理，不泄露任务是否存在
-  if (!canAccessTask(taskId, task.userId, request.headers.get("x-user-id") || "admin")) {
+  if (!canAccessTask(taskId, task.userId, resolveCallerId(request) || "")) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
   if (tasks.size > 100) {
@@ -904,7 +906,8 @@ export async function DELETE(request: NextRequest) {
   const task = tasks.get(taskId);
   if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
   // 归属校验：不能取消他人任务
   if (!canAccessTask(taskId, task.userId, userId)) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });

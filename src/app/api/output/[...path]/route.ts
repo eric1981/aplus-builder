@@ -9,7 +9,10 @@ export async function GET(
 ) {
   const { path } = await params;
   // 多用户隔离：x-user-id 由 proxy 注入；无则视为 admin（本地默认布局）
-  const base = userBase(req.headers.get("x-user-id") || "admin");
+  // 该路由在 proxy 中已按「登录用户」或「签名公开图归属方」注入 x-user-id；缺失即拒绝
+  const owner = req.headers.get("x-user-id");
+  if (!owner) return new NextResponse("Unauthorized", { status: 401 });
+  const base = userBase(owner);
 
   // 防目录遍历：拒绝 "."/".." 路径组件、反斜杠、控制字符和以 "/" 开头的绝对段。
   // 注意：段内允许 "/" —— 嵌套目录（客户/产品）经 encodeURIComponent 后会用 %2F 表示，

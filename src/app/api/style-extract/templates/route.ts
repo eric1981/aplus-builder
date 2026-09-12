@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, existsSync } from "fs";
 import { join, basename, resolve, sep } from "path";
 import { listVisibleTemplates, deleteTemplate, ensureThumbnail, TEMPLATES_DIR } from "@/lib/style-templates";
+import { checkRateLimit } from "@/lib/limits";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 // 模块级去重：避免并发请求重复触发同一模板截图
 const thumbPending = new Set<string>();
@@ -14,7 +16,8 @@ const MAX_LAZY_PER_REQUEST = 4;
  * DELETE ?id=xxx   → 删除（owner 本人或 admin）
  */
 export async function GET(request: NextRequest) {
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
 
   // 预览内容：返回模板 HTML
   // 安全 P0-2：此前直接把 contentId 拼进 join()，且不校验归属 ——
@@ -36,13 +39,21 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // 该端点会触发 Chrome 截图（懒生成缩略图），必须限流
+  if (!checkRateLimit(`templates:${userId}`)) {
+    return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
+  }
+
   try {
+    const isAdminCaller = userId === "admin";
     const list = listVisibleTemplates(userId).map((t) => ({
       id: t.id,
       filename: t.filename,
       thumb: t.thumb,
-      ownerId: t.ownerId,
+      // 安全：不再向普通用户暴露他人 ownerId；前端只需区分"平台模板/我的模板"
+      isPlatform: t.ownerId === "admin",
       createdAt: t.createdAt,
+      ...(isAdminCaller ? { ownerId: t.ownerId } : {}),
     }));
 
     // 懒生成缩略图：无缩略图且模板文件在 → 后台补截图（不阻塞响应，刷新后可见）
@@ -62,7 +73,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
   const r = deleteTemplate(id, userId);

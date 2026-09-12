@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import {
   getUserById, setUserDisabled, setUserRole, setUserQuota, resetUserPassword, deleteUser,
+  rotateUserToken,
 } from "@/lib/users";
 import { addCredits, consumeCredits, getCreditBalance } from "@/lib/credits";
 import { logAudit } from "@/lib/audit";
@@ -26,6 +27,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     dailyLimit?: number | null;
     monthlyLimit?: number | null;
     creditsAdjust?: number;
+    /** 轮换 API token（返回新 token 明文一次） */
+    rotateApiToken?: boolean;
   };
   try {
     body = await request.json();
@@ -33,7 +36,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
   }
 
+  let rotatedToken: string | undefined;
+
   try {
+    // 轮换 API token：库中只存哈希，明文仅在响应里出现一次
+    if (body.rotateApiToken === true) {
+      rotatedToken = rotateUserToken(id);
+      logAudit(admin.id, "admin.user_rotate_token", { target: id });
+    }
     if (typeof body.disabled === "boolean") {
       setUserDisabled(id, body.disabled);
       logAudit(admin.id, "admin.user_disable", { target: id, disabled: body.disabled });
@@ -69,7 +79,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         logAudit(admin.id, "admin.credit_deduct", { target: id, amount: -delta });
       }
     }
-    return NextResponse.json({ ok: true, credits: getCreditBalance(id) });
+    return NextResponse.json({
+      ok: true,
+      credits: getCreditBalance(id),
+      ...(rotatedToken ? { apiToken: rotatedToken, apiTokenNote: "请立即复制保存：服务端只存哈希" } : {}),
+    });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "操作失败" }, { status: 400 });
   }

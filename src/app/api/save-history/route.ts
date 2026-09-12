@@ -3,6 +3,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { join, resolve, sep } from "path";
 import { userBase } from "@/lib/config";
 import { checkRateLimit } from "@/lib/limits";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /** 上限（安全 H6）：此前无任何限制，单请求即可打满磁盘 / 阻塞事件循环 */
 const MAX_ENTRIES = 50;
@@ -13,7 +14,8 @@ const MAX_VARIANTS = 20;
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = request.headers.get("x-user-id") || "admin";
+    const userId = resolveCallerId(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
     if (!checkRateLimit(`save-history:${userId}`)) {
       return NextResponse.json({ ok: false, error: "请求过于频繁，请稍后再试" }, { status: 429 });
     }

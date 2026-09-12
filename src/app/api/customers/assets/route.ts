@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCustomer, getCustomerFilePath } from "@/lib/customer-store";
 import { readFileSync } from "fs";
 import { extname } from "path";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /**
  * GET /api/customers/assets?id=<customerId>&type=logo|model-ref
@@ -10,7 +11,8 @@ import { extname } from "path";
 export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id");
   const type = request.nextUrl.searchParams.get("type");
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
 
   if (!id || !type) {
     return NextResponse.json({ error: "Missing id or type" }, { status: 400 });

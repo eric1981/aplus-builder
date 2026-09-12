@@ -8,12 +8,24 @@
  * 使用 Node 24 内置 node:sqlite（零依赖）。若运行环境不支持会抛出明确错误。
  */
 import { mkdirSync, existsSync, readdirSync, statSync, readFileSync } from "fs";
-import { join, relative } from "path";
+import { join, relative, resolve } from "path";
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "crypto";
 import { OUTPUT_BASE } from "./config";
 
+/** token 哈希（与 lib/auth 的 hashOpaqueToken 一致；此处内联以避免 auth ↔ db 循环依赖） */
+function hashOpaqueToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 const DATA_DIR = join(process.cwd(), "data");
-const DB_PATH = join(DATA_DIR, "app.db");
+/**
+ * 数据库文件路径。可用环境变量 APLUS_DB_PATH 覆盖 —— 供自测（scripts/selftest.mjs）
+ * 指向临时库，避免污染真实数据。
+ */
+const DB_PATH = process.env.APLUS_DB_PATH
+  ? resolve(process.env.APLUS_DB_PATH)
+  : join(DATA_DIR, "app.db");
 
 function ensureDir() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -298,6 +310,7 @@ function ensureUserColumns() {
     const adds: { col: string; ddl: string }[] = [
       { col: "email", ddl: `ALTER TABLE users ADD COLUMN email TEXT` },
       { col: "token", ddl: `ALTER TABLE users ADD COLUMN token TEXT` },
+      { col: "token_hash", ddl: `ALTER TABLE users ADD COLUMN token_hash TEXT` },
       { col: "password_hash", ddl: `ALTER TABLE users ADD COLUMN password_hash TEXT` },
       { col: "disabled", ddl: `ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0` },
       { col: "daily_limit", ddl: `ALTER TABLE users ADD COLUMN daily_limit INTEGER` },
@@ -309,6 +322,9 @@ function ensureUserColumns() {
     for (const { col, ddl } of adds) {
       if (!names.has(col)) db.exec(ddl);
     }
+    // API token 改存哈希后的查找索引（兼容期亦可回退查明文列）
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_users_token_hash ON users(token_hash)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_users_token_plain ON users(token)`);
   } catch {}
 }
 
@@ -363,12 +379,13 @@ export function migrateLegacy() {
         const rows = JSON.parse(readFileSync(usersFile, "utf-8")) as {
           id: string; name: string; token: string; role?: string;
         }[];
+        // 安全 H8：迁移时即只存 token 哈希（明文不再落库）；查找逻辑会对来 token 做哈希
         const ins = db.prepare(
-          `INSERT OR IGNORE INTO users (id, name, token, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO users (id, name, token, token_hash, role, created_at) VALUES (?, ?, '', ?, ?, ?)`,
         );
         for (const u of rows) {
           if (!u?.id || !u?.token) continue;
-          ins.run(u.id, u.name || u.id, u.token, u.role || "user", new Date().toISOString());
+          ins.run(u.id, u.name || u.id, hashOpaqueToken(u.token), u.role || "user", new Date().toISOString());
         }
       }
     } catch {}

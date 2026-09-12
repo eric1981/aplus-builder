@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { agentSummary } from "@/lib/affiliate";
 import { db } from "@/lib/db";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /**
  * GET /api/affiliate/me
@@ -8,7 +9,8 @@ import { db } from "@/lib/db";
  * 非代理返回 { isAgent: false }。
  */
 export async function GET(request: NextRequest) {
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ isAgent: false });
   try {
     const row = db
       .prepare(`SELECT is_agent, agent_code FROM users WHERE id = ?`)

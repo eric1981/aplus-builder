@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { listCustomers, createCustomer, updateCustomer, deleteCustomer } from "@/lib/customer-store";
 import { listVisibleTemplates } from "@/lib/style-templates";
 import { logAudit } from "@/lib/audit";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "未知错误";
 }
 
-function userIdOf(request: NextRequest): string {
-  return request.headers.get("x-user-id") || "admin";
+function userIdOf(request: NextRequest): string | null {
+  return resolveCallerId(request);
 }
 
 /**
@@ -27,7 +28,9 @@ const FILE_NAME_FIELDS = new Set(["logo", "modelRef", "template"]);
 
 export async function GET(request: NextRequest) {
   try {
-    return NextResponse.json(listCustomers(userIdOf(request)));
+    const userId = userIdOf(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
+    return NextResponse.json(listCustomers(userId));
   } catch (e) {
     return NextResponse.json({ error: errMsg(e) }, { status: 500 });
   }
@@ -36,6 +39,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const userId = userIdOf(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
     const { name } = await request.json();
     if (!name?.trim()) return NextResponse.json({ error: "客户名称不能为空" }, { status: 400 });
     const profile = createCustomer(name.trim(), userId);
@@ -49,6 +53,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const userId = userIdOf(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
     const body = await request.json();
     const { id } = body;
     if (!id || typeof id !== "string") {
@@ -97,6 +102,7 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const userId = userIdOf(request);
+    if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
     const id = request.nextUrl.searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
     deleteCustomer(id, userId);

@@ -7,7 +7,8 @@ interface TemplateInfo {
   id: string;
   filename: string;
   thumb: string | null;
-  ownerId: string;
+  ownerId?: string;
+  isPlatform?: boolean;
   createdAt: number;
 }
 
@@ -98,7 +99,7 @@ export default function TemplateGallery() {
               </div>
             </div>
             <div className="px-2 py-1.5 text-[10px] text-text-muted truncate" title={t.id}>
-              {t.ownerId === "admin" ? "平台模板" : "我的模板"} · {new Date(t.createdAt).toLocaleDateString("zh-CN")}
+              {t.isPlatform ? "平台模板" : "我的模板"} · {new Date(t.createdAt).toLocaleDateString("zh-CN")}
             </div>
           </div>
         ))}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, existsSync } from "fs";
 import { join, resolve, sep } from "path";
 import { TEMPLATES_DIR, listVisibleTemplates } from "@/lib/style-templates";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /**
  * 模板静态资源（预览用）：/api/style-extract/templates/asset/[id]/[file]
@@ -31,7 +32,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string; file: string[] }> },
 ) {
   const { id, file } = await params;
-  const userId = req.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(req);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
   const fileName = (file || []).join("/");
 
   if (!id || !fileName) {

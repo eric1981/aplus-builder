@@ -9,15 +9,15 @@
  */
 import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
-import { hashPassword } from "@/lib/auth";
+import { hashPassword, hashOpaqueToken } from "@/lib/auth";
 import { getSettingInt } from "@/lib/settings";
 
 export interface User {
   id: string;
   name: string;
   email?: string | null;
-  /** API token（Bearer） */
-  token: string;
+  /** 是否已配置 API token（仅存哈希，明文不可回读，安全 H8） */
+  hasToken: boolean;
   role: "admin" | "user";
   disabled: boolean;
   /** 每用户配额（null = 不限，跟随全局） */
@@ -37,7 +37,7 @@ function rowToUser(row: Record<string, unknown>): User {
     id: String(row.id),
     name: String(row.name),
     email: row.email ? String(row.email) : null,
-    token: row.token ? String(row.token) : "",
+    hasToken: !!(row.token_hash || row.token),
     role: (row.role as User["role"]) || "user",
     disabled: Boolean(Number(row.disabled || 0)),
     dailyLimit: row.daily_limit == null ? null : Number(row.daily_limit),
@@ -51,17 +51,58 @@ function rowToUser(row: Record<string, unknown>): User {
 
 // ===== 查询 =====
 
-/** 按 token 查用户；未匹配返回 null */
+/**
+ * 按 API token 查用户（安全 H8：库中只存 SHA-256 哈希）。
+ * 兼容旧库里的明文 token：命中后**就地升级**为哈希并清掉明文列，
+ * 因此老脚本无需改配置即可继续用。
+ */
 export function findUserByToken(token: string): User | null {
   if (!token) return null;
   try {
-    const row = db
-      .prepare(`SELECT * FROM users WHERE token = ?`)
-      .get(token) as Record<string, unknown> | undefined;
+    const hash = hashOpaqueToken(token);
+    let row = db
+      .prepare(`SELECT * FROM users WHERE token_hash = ?`)
+      .get(hash) as Record<string, unknown> | undefined;
+
+    if (!row) {
+      // 兼容期：旧明文 token 命中 → 升级为哈希（明文立即清除）
+      const legacy = db
+        .prepare(`SELECT * FROM users WHERE token = ? AND token IS NOT NULL AND token != ''`)
+        .get(token) as Record<string, unknown> | undefined;
+      if (legacy) {
+        try {
+          db.prepare(`UPDATE users SET token_hash = ?, token = '' WHERE id = ?`).run(hash, legacy.id);
+          console.log(`[auth] API token 已升级为哈希存储：${String(legacy.id)}`);
+        } catch {}
+        row = legacy;
+      }
+    }
+
     if (!row || Number(row.disabled)) return null;
     return rowToUser(row);
   } catch {
     return null;
+  }
+}
+
+/** 生成新的 API token：返回明文（仅此一次），库中只存哈希 */
+export function rotateUserToken(userId: string): string {
+  const u = getUserById(userId);
+  if (!u) throw new Error("用户不存在");
+  const raw = randomBytes(24).toString("hex");
+  db.prepare(`UPDATE users SET token_hash = ?, token = '' WHERE id = ?`).run(hashOpaqueToken(raw), userId);
+  return raw;
+}
+
+/** 是否已配置 API token（管理后台展示用，不回显明文） */
+export function hasApiToken(userId: string): boolean {
+  try {
+    const row = db
+      .prepare(`SELECT (token_hash IS NOT NULL OR (token IS NOT NULL AND token != '')) AS has FROM users WHERE id = ?`)
+      .get(userId) as { has: number } | undefined;
+    return Number(row?.has || 0) === 1;
+  } catch {
+    return false;
   }
 }
 
@@ -99,7 +140,7 @@ export function createUserWithPassword(
   email: string,
   password: string,
   role: "admin" | "user" = "user",
-): User {
+): { user: User; apiToken: string } {
   const cleanEmail = email.toLowerCase().trim();
   const existing = db
     .prepare(`SELECT id FROM users WHERE email = ?`)
@@ -112,14 +153,16 @@ export function createUserWithPassword(
   const now = new Date().toISOString();
   // 初始积分：settings.newUserCredits 可配（默认 20），管理员可在后台调整
   const initialCredits = Math.max(0, getSettingInt("newUserCredits", 20));
+  // API token：明文只在返回值里出现一次，库中仅存哈希（安全 H8）
+  const apiToken = randomBytes(24).toString("hex");
   db.prepare(
-    `INSERT INTO users (id, name, email, token, password_hash, role, disabled, credits, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    `INSERT INTO users (id, name, email, token, token_hash, password_hash, role, disabled, credits, created_at)
+     VALUES (?, ?, ?, '', ?, ?, ?, 0, ?, ?)`,
   ).run(
     id,
     name.trim(),
     cleanEmail,
-    randomBytes(16).toString("hex"),
+    hashOpaqueToken(apiToken),
     hashPassword(password),
     role,
     initialCredits,
@@ -132,7 +175,7 @@ export function createUserWithPassword(
        VALUES (?, ?, ?, ?, ?)`,
     ).run(id, initialCredits, "signup.bonus", initialCredits, Date.now());
   } catch {}
-  return getUserById(id)!;
+  return { user: getUserById(id)!, apiToken };
 }
 
 /** 重置密码（新密码由管理员转交用户） */
@@ -191,11 +234,12 @@ export function seedUsersFromEnv() {
       id: string; name: string; token: string; role?: string;
     }[];
     const ins = db.prepare(
-      `INSERT OR IGNORE INTO users (id, name, token, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO users (id, name, token, token_hash, role, created_at) VALUES (?, ?, '', ?, ?, ?)`,
     );
     for (const u of parsed) {
       if (!u?.id || !u?.token) continue;
-      ins.run(u.id, u.name || u.id, u.token, u.role || "user", new Date().toISOString());
+      // 只存哈希；AUTH_USERS 里的明文由运维自己保存
+      ins.run(u.id, u.name || u.id, hashOpaqueToken(u.token), u.role || "user", new Date().toISOString());
     }
   } catch {}
 }

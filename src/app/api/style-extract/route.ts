@@ -15,6 +15,7 @@ import {
 } from "@/lib/agent-runtime";
 import { logAudit } from "@/lib/audit";
 import { getSettingInt, getSettingBool } from "@/lib/settings";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 const TEMPLATES_DIR = join(process.cwd(), "customer-templates");
 
@@ -34,7 +35,8 @@ let activeStyleCount = 0;
 // ===== POST：创建风格复刻任务 =====
 export async function POST(request: NextRequest) {
   const taskId = randomUUID();
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
 
   // 稳定性 P0：限流 + 并发上限
   if (!checkRateLimit(clientIp(request.headers))) {
@@ -289,7 +291,8 @@ export async function GET(request: NextRequest) {
   const task = tasks.get(taskId);
   if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
   // 归属校验：非本人（且非 admin）按"不存在"处理
-  const callerId = request.headers.get("x-user-id") || "admin";
+  const callerId = resolveCallerId(request);
+  if (!callerId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
   if (callerId !== "admin" && task.userId && task.userId !== callerId) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }

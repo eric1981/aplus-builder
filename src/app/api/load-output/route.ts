@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { userBase } from "@/lib/config";
 import { taskStore } from "@/app/api/generate/task-store";
 import { checkRateLimit } from "@/lib/limits";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /** 预览缩略图最长边（原图 2400px → 800px，base64 体积约 1/8，隧道/远程访问大幅提速） */
 const THUMB_MAX = 800;
@@ -57,11 +58,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "dir required" }, { status: 400 });
 
   // 稳定性：该接口是本项目最重的读路径（同步读盘 + base64 + gzip + sips 缩略图），必须限流
-  if (!checkRateLimit(`load-output:${req.headers.get("x-user-id") || "admin"}`)) {
+  if (!checkRateLimit(`load-output:${resolveCallerId(req) || "anon"}`)) {
     return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
   }
 
-  const callerId = req.headers.get("x-user-id") || "admin";
+  const callerId = resolveCallerId(req);
+  if (!callerId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
   const base = userBase(callerId);
 
   // 防目录遍历：dirName 允许含 "/"（客户/产品两级目录），但拒绝空段、"."、".." 和隐藏目录

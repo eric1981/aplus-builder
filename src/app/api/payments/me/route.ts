@@ -3,6 +3,7 @@ import { createOrder, listOrders, priceForCredits } from "@/lib/payments";
 import { getCreditBalance } from "@/lib/credits";
 import { getSetting, getSettingInt } from "@/lib/settings";
 import { logAudit } from "@/lib/audit";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /**
  * 用户侧充值接口
@@ -13,7 +14,8 @@ import { logAudit } from "@/lib/audit";
  * /api/payments/webhook（验签）或管理员后台手工确认来落地，客户端无法自行"标记已付"。
  */
 export async function GET(request: NextRequest) {
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
   return NextResponse.json({
     balance: getCreditBalance(userId),
     creditPriceCents: getSettingInt("creditPriceCents", 100),
@@ -24,7 +26,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const userId = request.headers.get("x-user-id") || "admin";
+  const userId = resolveCallerId(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized: 缺少身份信息" }, { status: 401 });
 
   let body: { credits?: number; amountCents?: number; note?: string };
   try {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserBySessionToken, SESSION_COOKIE, seedAdmin } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { getCreditBalance } from "@/lib/credits";
+import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /**
  * GET /api/auth/me

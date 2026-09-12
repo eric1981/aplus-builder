@@ -46,8 +46,13 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 // ===== 会话 =====
 
-function tokenHash(token: string): string {
+/** 不透明 token 的 SHA-256（会话 token 与 API token 共用；库中只存哈希） */
+export function hashOpaqueToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function tokenHash(token: string): string {
+  return hashOpaqueToken(token);
 }
 
 /** 创建会话，返回不透明 token（库中只存哈希） */
@@ -141,14 +146,14 @@ export function seedAdmin() {
     if (password) {
       // 显式配置了 ADMIN_PASSWORD：每次启动强制执行（同时可作为密码恢复手段）
       db.prepare(
-        `INSERT INTO users (id, name, email, token, password_hash, role, disabled, created_at)
+        `INSERT INTO users (id, name, email, token_hash, password_hash, role, disabled, created_at)
          VALUES ('admin', '管理员', ?, ?, ?, 'admin', 0, ?)
          ON CONFLICT(id) DO UPDATE SET
            email = excluded.email,
            password_hash = excluded.password_hash,
            role = 'admin',
            disabled = 0`,
-      ).run(email, randomBytes(16).toString("hex"), hashPassword(password), new Date().toISOString());
+      ).run(email, tokenHash(randomBytes(16).toString("hex")), hashPassword(password), new Date().toISOString());
       console.log(`[auth] 管理员就绪：${email}（密码来自 ADMIN_PASSWORD）`);
       return;
     }
@@ -163,9 +168,9 @@ export function seedAdmin() {
 
     const generated = randomBytes(9).toString("base64url");
     db.prepare(
-      `INSERT INTO users (id, name, email, token, password_hash, role, disabled, created_at)
-       VALUES ('admin', '管理员', ?, ?, ?, 'admin', 0, ?)`,
-    ).run(email, randomBytes(16).toString("hex"), hashPassword(generated), new Date().toISOString());
+      `INSERT INTO users (id, name, email, token, token_hash, password_hash, role, disabled, created_at)
+       VALUES ('admin', '管理员', ?, '', ?, ?, 'admin', 0, ?)`,
+    ).run(email, tokenHash(randomBytes(16).toString("hex")), hashPassword(generated), new Date().toISOString());
     console.log(`\n[auth] 已创建初始管理员：${email} / ${generated}`);
     console.log(`[auth] 请尽快登录修改密码（或设置 ADMIN_PASSWORD 环境变量后重建）。\n`);
   } catch {}

@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     credits: u.credits,
     isAgent: Boolean(u.isAgent),
     agentCode: u.agentCode || null,
+    hasApiToken: u.hasToken,
     usage: getUserQuotaUsage(u.id),
   }));
   return NextResponse.json({ users });
@@ -44,9 +45,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const user = createUserWithPassword(name, email, password, role);
+    const { user, apiToken } = createUserWithPassword(name, email, password, role);
     logAudit(admin.id, "admin.user_create", { target: user.id, email });
-    return NextResponse.json({ ok: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    // apiToken 仅在此处返回一次（库中只存哈希，之后无法回读）
+    return NextResponse.json({
+      ok: true,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      apiToken,
+      apiTokenNote: "请立即复制保存：服务端只存哈希，之后无法再次查看",
+    });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "创建失败" }, { status: 400 });
   }
