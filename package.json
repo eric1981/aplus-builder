@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "node scripts/dev.mjs",
     "prod": "next build && next start -p 3000",
-    "lint": "eslint"
+    "lint": "eslint",
+    "selftest": "node scripts/selftest.mjs",
+    "verify": "tsc --noEmit && next build && node scripts/selftest.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1",

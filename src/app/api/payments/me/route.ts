@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createOrder, listOrders, priceForCredits } from "@/lib/payments";
 import { getCreditBalance } from "@/lib/credits";
 import { getSetting, getSettingInt } from "@/lib/settings";
+import { getUserById } from "@/lib/users";
 import { logAudit } from "@/lib/audit";
 import { callerId as resolveCallerId } from "@/lib/request-user";
 
@@ -34,6 +35,11 @@ export async function POST(request: NextRequest) {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
+  }
+
+  // 下单前确认用户存在：否则后续回调入账会失败（避免"付了钱没处入账"）
+  if (!getUserById(userId)) {
+    return NextResponse.json({ error: "用户不存在，请先登录后再充值" }, { status: 404 });
   }
 
   const unit = Math.max(1, getSettingInt("creditPriceCents", 100));

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: 类型检查
+        run: npx tsc --noEmit
+
+      - name: 构建
+        run: npm run build
+
+      # 自测会自起一个临时实例（临时 DB + 临时 OUTPUT_BASE），断言钱与权限的关键不变量：
+      # 匿名读取产出被拒、公开图签名、支付入账/去重/金额校验/退款幂等、
+      # 账本一致性、API token 只存哈希、登录按账号限流、任务归属。
+      - name: 自测
+        run: npm run selftest

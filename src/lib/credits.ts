@@ -40,6 +40,10 @@ export function consumeCredits(
   if (amount <= 0) return { ok: true, balance: getCreditBalance(userId), delta: 0 };
   try {
     const result = withTx<CreditResult>(() => {
+      const exists = db.prepare(`SELECT 1 FROM users WHERE id = ?`).get(userId);
+      if (!exists) {
+        return { ok: false, reason: "用户不存在", balance: 0, needed: amount };
+      }
       // 原子扣减：仅当余额足够（余额不可能为负）
       const r = db
         .prepare(`UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?`)
@@ -77,18 +81,37 @@ export function addCredits(
 ): { balance: number; ok: boolean } {
   if (amount <= 0) return { balance: getCreditBalance(userId), ok: true };
   try {
-    return withTx(() => {
-      db.prepare(`UPDATE users SET credits = credits + ? WHERE id = ?`).run(amount, userId);
+    return withTx(() => grantCreditsInTx(userId, amount, reason, ref));
+  } catch {
+    // 幂等冲突（重复入账）会走到这里：事务已回滚，余额未被改动
+    return { balance: getCreditBalance(userId), ok: false };
+  }
+}
+
+/**
+ * 「事务内」入账原语：调用方已开启事务时使用（如支付回调要保证
+ * 订单状态与积分入账原子生效）。用户不存在时抛错，由外层回滚。
+ */
+export function grantCreditsInTx(
+  userId: string,
+  amount: number,
+  reason: string,
+  ref?: string,
+): { balance: number; ok: boolean } {
+  {
+    {
+      // 用户必须存在：否则 UPDATE 影响 0 行却写了流水（余额与流水不一致、钱"凭空消失"）
+      const r = db.prepare(`UPDATE users SET credits = credits + ? WHERE id = ?`).run(amount, userId);
+      if (Number(r.changes) === 0) {
+        throw new Error("用户不存在，入账已回滚");
+      }
       const balance = getCreditBalance(userId);
       db.prepare(
         `INSERT INTO credit_ledger (user_id, delta, reason, balance, ref, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(userId, amount, reason, balance, ref || null, Date.now());
       return { balance, ok: true };
-    });
-  } catch {
-    // 幂等冲突（重复入账）会走到这里：事务已回滚，余额未被改动
-    return { balance: getCreditBalance(userId), ok: false };
+    }
   }
 }
 

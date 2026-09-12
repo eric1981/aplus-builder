@@ -161,6 +161,30 @@ node scripts/reconcile-orders.mjs     # 订单↔流水↔余额 三方一致性
 node scripts/reconcile-credits.mjs    # 余额 vs 流水合计（--apply 补账）
 ```
 
+## 自测与 CI
+
+```bash
+npm run verify      # 类型检查 + 构建 + 端到端自测（推荐提交前跑）
+npm run selftest    # 只跑自测（需先 npm run build）
+```
+
+`scripts/selftest.mjs` 会在**临时数据库 + 临时产出目录**上自起一个实例（不触碰真实数据），断言：
+匿名读取产出文件被拒 / 首页公开图必须带有效签名 / 支付入账恰好一次且重放去重 / 金额不符拒绝 /
+退款回收与幂等 / 账本一致性（余额 == 流水合计）/ API token 只存哈希且轮换后旧 token 失效 /
+登录按账号限流 / 他人 taskId 不可读。
+
+也可复用已运行实例（受限环境或联调）：
+
+```bash
+SELFTEST_BASE_URL=http://127.0.0.1:3000 \
+SELFTEST_ADMIN_TOKEN=<admin 的 API token> \
+SELFTEST_WEBHOOK_SECRET=<PAYMENT_WEBHOOK_SECRET> \
+APLUS_DB_PATH=<该实例使用的 db 路径> \
+node scripts/selftest.mjs
+```
+
+CI（`.github/workflows/ci.yml`）在 push / PR 时跑：类型检查 → 构建 → 自测。
+
 ## 市场预测 Skill（需安装）
 
 `skills/ecommerce-market-analysis/SKILL.md`（已入库）需复制到 hermes profile：

@@ -6,7 +6,8 @@
  * - 初始管理员：从 ADMIN_EMAIL/ADMIN_PASSWORD 环境变量种子，未配置则生成随机密码并打印一次
  */
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "crypto";
-import { db } from "@/lib/db";
+import { db, withTx } from "@/lib/db";
+import { getSettingInt } from "@/lib/settings";
 
 export interface AuthUser {
   id: string;
@@ -137,6 +138,58 @@ export function authenticateUser(email: string, password: string): AuthUser | nu
 
 // ===== 初始管理员 =====
 
+/**
+ * 保证内置 admin 的初始积分有对应流水（幂等）。
+ * 新库：建号时 credits=0、随后补一条 signup.bonus 流水；
+ * 存量库：若余额>流水（历史遗留无流水），补一条差额流水使其一致（与
+ * scripts/reconcile-credits.mjs 同一口径，但只处理 admin）。
+ */
+function ensureAdminCredits() {
+  try {
+    const row = db.prepare(`SELECT credits FROM users WHERE id = 'admin'`).get() as { credits: number } | undefined;
+    if (!row) return;
+    const balance = Number(row.credits || 0);
+    const ledger = Number(
+      (db.prepare(`SELECT COALESCE(SUM(delta),0) x FROM credit_ledger WHERE user_id = 'admin'`).get() as { x: number }).x || 0,
+    );
+    if (balance === ledger) return;
+    // 新库路径：余额为 0 且无流水 → 按设置发放初始积分（默认 20）
+    if (balance === 0 && ledger === 0) {
+      const initial = Math.max(0, getSettingInt("newUserCredits", 20));
+      if (initial > 0) {
+        db.prepare(`UPDATE users SET credits = ? WHERE id = 'admin'`).run(initial);
+        grantAdminInitialCredits(initial);
+      }
+      return;
+    }
+    // 存量库：补齐差额（只补流水，不动余额）
+    withTx(() => {
+      db.prepare(
+        `INSERT INTO credit_ledger (user_id, delta, reason, balance, ref, created_at)
+         VALUES ('admin', ?, 'ledger.adjust', ?, ?, ?)`,
+      ).run(balance - ledger, balance, "seedAdmin", Date.now());
+    });
+  } catch {}
+}
+
+
+/**
+ * 给内置 admin 发放初始积分并写流水（安全/账务一致性）。
+ * 此前 seedAdmin 直接依赖列的 DEFAULT 值建号，不写 credit_ledger ——
+ * 这正是"余额比流水多 20"漂移的来源（新部署同样会犯）。
+ */
+function grantAdminInitialCredits(initialCredits: number) {
+  if (initialCredits <= 0) return;
+  try {
+    withTx(() => {
+      db.prepare(
+        `INSERT INTO credit_ledger (user_id, delta, reason, balance, ref, created_at)
+         VALUES ('admin', ?, 'signup.bonus', ?, ?, ?)`,
+      ).run(initialCredits, initialCredits, "seedAdmin", Date.now());
+    });
+  } catch {}
+}
+
 /** 首启创建管理员：ADMIN_EMAIL/ADMIN_PASSWORD 环境变量，未配置则随机生成并打印 */
 export function seedAdmin() {
   try {
@@ -155,6 +208,7 @@ export function seedAdmin() {
            disabled = 0`,
       ).run(email, tokenHash(randomBytes(16).toString("hex")), hashPassword(password), new Date().toISOString());
       console.log(`[auth] 管理员就绪：${email}（密码来自 ADMIN_PASSWORD）`);
+      ensureAdminCredits();
       return;
     }
 
@@ -168,9 +222,10 @@ export function seedAdmin() {
 
     const generated = randomBytes(9).toString("base64url");
     db.prepare(
-      `INSERT INTO users (id, name, email, token, token_hash, password_hash, role, disabled, created_at)
-       VALUES ('admin', '管理员', ?, '', ?, ?, 'admin', 0, ?)`,
+      `INSERT INTO users (id, name, email, token, token_hash, password_hash, role, disabled, credits, created_at)
+       VALUES ('admin', '管理员', ?, '', ?, ?, 'admin', 0, 0, ?)`,
     ).run(email, tokenHash(randomBytes(16).toString("hex")), hashPassword(generated), new Date().toISOString());
+    ensureAdminCredits();
     console.log(`\n[auth] 已创建初始管理员：${email} / ${generated}`);
     console.log(`[auth] 请尽快登录修改密码（或设置 ADMIN_PASSWORD 环境变量后重建）。\n`);
   } catch {}

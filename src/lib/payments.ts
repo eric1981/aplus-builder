@@ -17,7 +17,7 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { db, withTx } from "@/lib/db";
-import { addCredits, consumeCredits, getCreditBalance } from "@/lib/credits";
+import { addCredits, consumeCredits, getCreditBalance, grantCreditsInTx } from "@/lib/credits";
 import { getSettingInt } from "@/lib/settings";
 
 export type OrderStatus = "pending" | "paid" | "refunded" | "canceled";
@@ -170,25 +170,32 @@ export function markOrderPaid(
   if (order.status === "canceled") return { ok: false, credited: false, reason: "订单已取消", order };
 
   const externalId = opts.externalId || order.externalId || order.id;
+
   try {
-    // 订单状态与积分入账在同一事务内提交，避免"钱收了积分没到"
-    withTx(() => {
+    // 订单置为已支付 + 积分入账 **同一事务**：要么都成功，要么都回滚（订单留在 pending 可重试）
+    const credited = withTx(() => {
       db.prepare(
         `UPDATE orders SET status = 'paid', external_id = ?, provider = COALESCE(?, provider),
                            paid_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`,
       ).run(externalId, opts.provider || null, opts.paidAt || Date.now(), Date.now(), orderId);
+      // 入账积分：ref = 支付方交易号 → credit_ledger(reason,ref) 唯一索引保证只入一次
+      grantCreditsInTx(order.userId, order.credits, "payment.credit", externalId);
+      return true;
     });
-  } catch {
-    return { ok: false, credited: false, reason: "订单状态更新失败" };
+    return { ok: true, credited, order: getOrder(orderId) || order };
+  } catch (e) {
+    // 区分「重复入账（幂等，算成功）」与「真失败（如用户不存在/写库失败）」
+    const dup = db
+      .prepare(`SELECT 1 FROM credit_ledger WHERE reason = 'payment.credit' AND ref = ?`)
+      .get(externalId);
+    if (dup) return { ok: true, credited: false, order: getOrder(orderId) || order };
+    return {
+      ok: false,
+      credited: false,
+      reason: e instanceof Error ? e.message : "入账失败",
+      order: getOrder(orderId) || order,
+    };
   }
-
-  // 入账积分：ref = 支付方交易号 → credit_ledger(reason,ref) 唯一索引保证只入一次
-  const res = addCredits(order.userId, order.credits, "payment.credit", externalId);
-  if (!res.ok) {
-    // 已存在同 ref 的入账流水（重复回调）→ 幂等成功
-    return { ok: true, credited: false, order: getOrder(orderId) || order };
-  }
-  return { ok: true, credited: true, order: getOrder(orderId) || order };
 }
 
 /**
