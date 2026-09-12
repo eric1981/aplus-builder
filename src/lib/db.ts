@@ -221,6 +221,48 @@ export function initSchema() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_commission_ref
       ON commission_ledger(client_id, consumption_ref) WHERE consumption_ref IS NOT NULL;
 
+    -- 支付订单（接支付通道的核心账本）
+    -- 流程：pending → paid（入账积分）→ refunded（回收积分并退款）
+    CREATE TABLE IF NOT EXISTS orders (
+      id           TEXT PRIMARY KEY,               -- 本地订单号（ord_xxx）
+      user_id      TEXT NOT NULL,
+      credits      INTEGER NOT NULL,               -- 购买积分数
+      amount_cents INTEGER NOT NULL,               -- 应付金额（分）
+      currency     TEXT NOT NULL DEFAULT 'CNY',
+      provider     TEXT NOT NULL DEFAULT 'manual', -- manual/wechat/alipay/stripe/generic
+      status       TEXT NOT NULL DEFAULT 'pending',-- pending/paid/refunded/canceled
+      external_id  TEXT,                           -- 支付方交易号（入账幂等键）
+      note         TEXT,
+      created_at   INTEGER NOT NULL,
+      paid_at      INTEGER,
+      refunded_at  INTEGER,
+      updated_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, created_at);
+    -- 幂等：同一个支付方交易号只能落在一张订单上（防回调重放重复入账）
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_external
+      ON orders(external_id) WHERE external_id IS NOT NULL;
+
+    -- 支付回调事件（审计 + 幂等：同一事件只处理一次）
+    CREATE TABLE IF NOT EXISTS payment_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider     TEXT NOT NULL,
+      event_id     TEXT,
+      event_type   TEXT NOT NULL,
+      order_id     TEXT,
+      external_id  TEXT,
+      amount_cents INTEGER,
+      signature_ok INTEGER NOT NULL DEFAULT 0,
+      applied      INTEGER NOT NULL DEFAULT 0,     -- 是否实际改动了订单/积分
+      reason       TEXT,                           -- 未处理原因（签名失败/金额不符/订单不存在…）
+      payload      TEXT,                           -- 原始报文（脱敏后审计）
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pay_events_created ON payment_events(created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pay_events_idem
+      ON payment_events(provider, event_id) WHERE event_id IS NOT NULL;
+
     -- 复刻风格模板元数据（customer-templates/*.html）
     -- id = 模板文件名（不含 .html，复刻模板为 taskId，手工模板为原名）
     CREATE TABLE IF NOT EXISTS style_templates (

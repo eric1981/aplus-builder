@@ -122,6 +122,45 @@ API 脚本调用（非浏览器）可用 `AUTH_USERS='[{"id":"alice","name":"Ali
 
 > 合规待办：生成内容含模特图，公开运营前建议接入外部内容审核服务（肖像/版权）。
 
+## 支付 / 充值接入
+
+后端已就绪（通道无关），接入新通道只需实现"下单跳转 + 回调字段映射"。
+
+**环境变量**
+```bash
+PAYMENT_WEBHOOK_SECRET=<强随机串>   # 回调验签密钥；未配置时回调接口 fail-closed 返回 503
+```
+
+**配置中心**：`积分单价`（分/积分，默认 100）、`最低起充积分`（默认 10）、`支付通道`（manual/wechat/alipay/stripe/generic）。
+
+**接口**
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/payments/me` | 我的余额 + 单价 + 历史订单 |
+| POST | `/api/payments/me` | 创建充值单 `{credits}` 或 `{amountCents}`（需登录） |
+| POST | `/api/payments/webhook` | 支付方回调（**免会话鉴权，凭 HMAC 签名**） |
+| GET/POST | `/api/admin/orders` | 订单列表/汇总/事件流；`create` / `markPaid` / `refund` / `cancel` |
+
+**回调约定**（把通道报文映射成这个结构即可）
+```json
+{ "event_id": "evt_123", "type": "payment.succeeded",
+  "order_id": "ord_xxx", "external_id": "wx_42000...", "amount_cents": 10000 }
+```
+签名头：`x-payment-signature: <hmac-sha256(rawBody, PAYMENT_WEBHOOK_SECRET) 的 hex>`（兼容 `sha256=` 前缀）。
+
+**状态机与安全保证**
+- `pending → paid`（入账积分）`→ refunded`（回收积分）；回调只驱动 `payment.succeeded` / `refund.succeeded`
+- 三重防重放：`orders.external_id` 唯一 + `credit_ledger(payment.credit, ref)` 唯一 + `payment_events(provider,event_id)` 唯一
+- 回调金额与订单金额不一致 → 不入账，落事件待人工核对；签名失败 → 401 且不做任何改动
+- 退款为管理员操作；余额不足时拒绝（不把用户余额扣成负数）
+- 客户端无法自行"标记已付"：只有验签回调或管理员后台能改变支付状态
+
+**对账**（建议配 cron 定时跑，非 0 退出码告警）
+```bash
+node scripts/reconcile-orders.mjs     # 订单↔流水↔余额 三方一致性
+node scripts/reconcile-credits.mjs    # 余额 vs 流水合计（--apply 补账）
+```
+
 ## 市场预测 Skill（需安装）
 
 `skills/ecommerce-market-analysis/SKILL.md`（已入库）需复制到 hermes profile：

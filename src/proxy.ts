@@ -72,6 +72,13 @@ export function proxy(request: NextRequest) {
     return withSecurityHeaders(NextResponse.next());
   }
 
+  // 支付回调：支付方是外部系统，无法携带用户会话 —— 改为**凭 HMAC 签名建立身份**
+  // （route 内部 verifySignature 校验，未配置 PAYMENT_WEBHOOK_SECRET 时 fail-closed 503）。
+  // 除该路径外的支付接口（下单/查单/退款）一律仍要求登录。
+  if (pathname === "/api/payments/webhook") {
+    return withSecurityHeaders(NextResponse.next());
+  }
+
   const isLocal = LOCAL_HOSTNAMES.has(
     extractHostname(request.headers.get("host") || ""),
   );
