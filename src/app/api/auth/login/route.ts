@@ -4,6 +4,19 @@ import { checkRateLimit, clientIp } from "@/lib/limits";
 import { getSettingInt } from "@/lib/settings";
 import { logAudit } from "@/lib/audit";
 
+/**
+ * 是否通过 HTTPS 访问（安全 Medium：会话 Cookie 的 Secure 标志）。
+ * 不能用 NODE_ENV 判断 —— 纯 HTTP（局域网 IP / http 隧道）下带 Secure 的 Cookie 会被
+ * 浏览器直接丢弃，导致登录静默失效；这里以请求实际协议为准。
+ */
+function isSecureRequest(request: NextRequest): boolean {
+  return (
+    request.nextUrl.protocol === "https:" ||
+    request.headers.get("x-forwarded-proto") === "https"
+  );
+}
+
+
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 天（秒）
 
 export async function POST(request: NextRequest) {
@@ -50,6 +63,7 @@ export async function POST(request: NextRequest) {
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
+    secure: isSecureRequest(request),
     path: "/",
     maxAge: SESSION_MAX_AGE,
   });
@@ -57,6 +71,7 @@ export async function POST(request: NextRequest) {
   res.cookies.set(LOGOUT_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
+    secure: isSecureRequest(request),
     path: "/",
     maxAge: 0,
   });

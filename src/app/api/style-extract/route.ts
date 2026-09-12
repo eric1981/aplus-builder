@@ -16,6 +16,8 @@ const TEMPLATES_DIR = join(process.cwd(), "customer-templates");
 
 type StyleTask = {
   status: "running" | "done" | "error";
+  /** 复刻任务归属（安全 H5：轮询校验，防止横向读取他人复刻结果/日志） */
+  userId?: string;
   templateId?: string;
   html?: string;
   error?: string;
@@ -99,13 +101,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: e.message || "截图无效" }, { status: 400 });
     }
 
-    // 稳定性 P0：配额（日/月成本熔断）——校验通过后才消耗
-    const quota = consumeQuota(userId);
-    if (!quota.ok) {
-      return NextResponse.json({ error: quota.reason }, { status: 429 });
-    }
-
-    // 积分真实扣减（模板复刻）
+    // 积分真实扣减（模板复刻）——先扣积分再消耗配额，避免积分不足也白烧配额
     const creditCost = creditCostFor("style_extract");
     const credit = consumeCredits(userId, creditCost, "style_extract", taskId);
     if (!credit.ok) {
@@ -115,6 +111,14 @@ export async function POST(request: NextRequest) {
       );
     }
     console.log(`[credits] ${userId} 消耗 ${creditCost} 分（style_extract），余额 ${credit.balance}`);
+
+    // 稳定性 P0：配额（日/月成本熔断）；不足则回滚积分与佣金
+    const quota = consumeQuota(userId);
+    if (!quota.ok) {
+      const refund = refundTaskCredits(userId, taskId);
+      logAudit(userId, "style.quota_reject", { taskId, reason: quota.reason, refunded: refund.refunded });
+      return NextResponse.json({ error: quota.reason }, { status: 429 });
+    }
 
     // 保存目录确保存在
     mkdirSync(TEMPLATES_DIR, { recursive: true });
@@ -204,7 +208,7 @@ export async function POST(request: NextRequest) {
 
     // 启动 agent
     const logFile = join(TEMPLATES_DIR, `${taskId}_agent.log`);
-    tasks.set(taskId, { status: "running", log: "" });
+    tasks.set(taskId, { status: "running", userId, log: "" });
     activeStyleCount++;
 
     let settled = false;
@@ -223,7 +227,7 @@ export async function POST(request: NextRequest) {
       if (settled) return;
       settled = true;
       activeStyleCount = Math.max(0, activeStyleCount - 1);
-      tasks.set(taskId, { status, templateId: taskId, html, error: errMsg, log: logBuffer.slice(-5000) });
+      tasks.set(taskId, { status, userId, templateId: taskId, html, error: errMsg, log: logBuffer.slice(-5000) });
       logAudit(userId, status === "done" ? "style.done" : "style.error", { taskId, error: errMsg });
       // 复刻成功：注册模板（归属当前用户）+ 后台生成缩略图
       if (status === "done") {
@@ -276,6 +280,11 @@ export async function GET(request: NextRequest) {
 
   const task = tasks.get(taskId);
   if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  // 归属校验：非本人（且非 admin）按"不存在"处理
+  const callerId = request.headers.get("x-user-id") || "admin";
+  if (callerId !== "admin" && task.userId && task.userId !== callerId) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
 
   return NextResponse.json(task);
 }

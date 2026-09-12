@@ -1,10 +1,11 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "fs";
-import { join, resolve, sep, relative } from "path";
+import { join, resolve, sep, relative, basename } from "path";
 import { gzipSync } from "zlib";
 import { spawnSync } from "child_process";
 import { NextRequest, NextResponse } from "next/server";
 import { userBase } from "@/lib/config";
 import { taskStore } from "@/app/api/generate/task-store";
+import { checkRateLimit } from "@/lib/limits";
 
 /** 预览缩略图最长边（原图 2400px → 800px，base64 体积约 1/8，隧道/远程访问大幅提速） */
 const THUMB_MAX = 800;
@@ -33,6 +34,9 @@ function ensureThumb(originDir: string, name: string): string {
 
 /** 读取图片为 base64，优先缩略图（预览提速），返回原图相对路径供下载 */
 function readImageBase64(originDir: string, name: string, base: string): { name: string; base64: string; mime: string; path: string } {
+  // 防穿越兜底：读取路径必须仍在 originDir 内
+  const target = resolve(join(originDir, name));
+  if (!target.startsWith(resolve(originDir) + sep)) throw new Error("非法文件名");
   const src = ensureThumb(originDir, name);
   const buf = readFileSync(src);
   const ext = (src.split(".").pop() || "jpeg").toLowerCase();
@@ -52,7 +56,13 @@ export async function GET(req: NextRequest) {
   if (!dirName)
     return NextResponse.json({ error: "dir required" }, { status: 400 });
 
-  const base = userBase(req.headers.get("x-user-id") || "admin");
+  // 稳定性：该接口是本项目最重的读路径（同步读盘 + base64 + gzip + sips 缩略图），必须限流
+  if (!checkRateLimit(`load-output:${req.headers.get("x-user-id") || "admin"}`)) {
+    return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
+  }
+
+  const callerId = req.headers.get("x-user-id") || "admin";
+  const base = userBase(callerId);
 
   // 防目录遍历：dirName 允许含 "/"（客户/产品两级目录），但拒绝空段、"."、".." 和隐藏目录
   const parts = dirName.split("/");
@@ -150,9 +160,16 @@ export async function GET(req: NextRequest) {
           ["model_ref", "modelImage", "模特参考"],
           ["logo", "logoImage", "Logo"],
         ] as const;
+        // 目录内实际文件（安全 H6：input-meta.json 位于 agent 可写目录，其内容视为不可信，
+        // 只能取其中的**文件名**且必须真实存在于该目录，避免 "../../x" 造成任意文件读取）
+        let inputFiles: string[] = [];
+        try { inputFiles = readdirSync(inputDir); } catch { inputFiles = []; }
         for (const [prefix, metaKey, label] of known) {
-          const metaName = inputMeta ? String((inputMeta as Record<string, unknown>)[metaKey] || "") : "";
-          const candidates = metaName ? [metaName] : readdirSync(inputDir).filter((f) => f.startsWith(prefix) && /\.(jpg|jpeg|png|webp)$/i.test(f));
+          const metaRaw = inputMeta ? String((inputMeta as Record<string, unknown>)[metaKey] || "") : "";
+          const metaName = metaRaw ? basename(metaRaw) : "";
+          const candidates = metaName && inputFiles.includes(metaName)
+            ? [metaName]
+            : inputFiles.filter((f) => f.startsWith(prefix) && /\.(jpg|jpeg|png|webp)$/i.test(f));
           for (const name of candidates) {
             const p = join(inputDir, name);
             if (!existsSync(p)) continue;
@@ -168,7 +185,7 @@ export async function GET(req: NextRequest) {
       html,
       images,
       variants,
-      prediction: taskStore.getPredictionByDir(dirName),
+      prediction: taskStore.getPredictionByDir(dirName, callerId === "admin" ? undefined : callerId),
       input: {
         meta: inputMeta,
         images: inputImages,

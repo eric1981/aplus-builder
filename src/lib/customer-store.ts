@@ -8,7 +8,7 @@
  * admin 沿用旧磁盘布局，其他用户隔离到 <OUTPUT_BASE>/<userId>/customers/。
  */
 
-import { existsSync, rmSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, rmSync, mkdirSync, readFileSync, lstatSync, realpathSync } from "fs";
 import { join, extname, resolve, sep } from "path";
 import { db, ensureMigrated } from "@/lib/db";
 import { userBase } from "@/lib/config";
@@ -187,7 +187,18 @@ export function getCustomerFilePath(
   if (filename.includes("/") || filename.includes("\\") || filename.includes("\0")) return null;
   const p = resolve(customerDir(userId, id), filename);
   assertInside(customersRoot(userId), p);
-  return existsSync(p) ? p : null;
+  if (!existsSync(p)) return null;
+  // 安全 Medium：客户目录位于 agent 可写区域，若目录内被放入指向 /etc/passwd、
+  // ~/.ssh/id_rsa 之类的软链，会被当作图片读走。这里要求必须是普通文件，
+  // 且 realpath 后仍在客户根目录内。
+  try {
+    if (!lstatSync(p).isFile()) return null;
+    const real = realpathSync(p);
+    assertInside(realpathSync(customersRoot(userId)), real);
+  } catch {
+    return null;
+  }
+  return p;
 }
 
 /** 客户 Logo 的 base64 data URL */

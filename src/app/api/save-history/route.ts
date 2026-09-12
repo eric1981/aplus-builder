@@ -2,14 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeFileSync, mkdirSync } from "fs";
 import { join, resolve, sep } from "path";
 import { userBase } from "@/lib/config";
+import { checkRateLimit } from "@/lib/limits";
+
+/** 上限（安全 H6）：此前无任何限制，单请求即可打满磁盘 / 阻塞事件循环 */
+const MAX_ENTRIES = 50;
+const MAX_HTML_BYTES = 5_000_000;      // 单条 HTML
+const MAX_IMAGES_PER_ENTRY = 200;      // 单条最多落盘图片数
+const MAX_IMAGE_BYTES = 15_000_000;    // 单张图片
+const MAX_VARIANTS = 20;
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = request.headers.get("x-user-id") || "admin";
+    if (!checkRateLimit(`save-history:${userId}`)) {
+      return NextResponse.json({ ok: false, error: "请求过于频繁，请稍后再试" }, { status: 429 });
+    }
+
     const entries = await request.json();
-    const base = userBase(request.headers.get("x-user-id") || "admin");
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return NextResponse.json({ ok: false, error: "entries 必须是非空数组" }, { status: 400 });
+    }
+    if (entries.length > MAX_ENTRIES) {
+      return NextResponse.json({ ok: false, error: `单次最多导出 ${MAX_ENTRIES} 条` }, { status: 413 });
+    }
+    const base = userBase(userId);
     mkdirSync(base, { recursive: true });
 
     let totalImages = 0;
+    let totalSkipped = 0;
 
     for (const entry of entries) {
       const dirName = entry.title
@@ -27,41 +47,44 @@ export async function POST(request: NextRequest) {
       }
       mkdirSync(dir, { recursive: true });
 
-      let html = entry.html || "";
+      let html = typeof entry.html === "string" ? entry.html : "";
+      if (html.length > MAX_HTML_BYTES) {
+        return NextResponse.json({ ok: false, error: `单条 HTML 过大（上限 ${MAX_HTML_BYTES} 字符）` }, { status: 413 });
+      }
 
       // 从 HTML 中提取 base64 图片，保存为文件，替换为相对路径
       const imagesDir = join(dir, "images");
       const imgRegex = /<img[^>]+src="data:(image\/[^;]+);base64,([^"]+)"/g;
-      let match;
       let imgIndex = 0;
+      let imgSkipped = 0;
 
-      while ((match = imgRegex.exec(html)) !== null) {
-        const mimeType = match[1];
-        const base64Data = match[2];
+      // 一次性替换（回调），避免在循环里对整串做 replace 造成 O(n²)
+      html = html.replace(imgRegex, (full: string, mimeType: string, base64Data: string) => {
+        if (imgIndex >= MAX_IMAGES_PER_ENTRY) { imgSkipped++; return full; }
         const ext = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
         const imgName = `image_${String(imgIndex + 1).padStart(2, "0")}.${ext}`;
-
         try {
           const buf = Buffer.from(base64Data, "base64");
+          if (buf.length > MAX_IMAGE_BYTES) { imgSkipped++; return full; }
           mkdirSync(imagesDir, { recursive: true });
           writeFileSync(join(imagesDir, imgName), buf);
           totalImages++;
+          imgIndex++;
+          return full.replace(/src="data:[^"]+"/, `src="./images/${imgName}"`);
+        } catch {
+          imgSkipped++;
+          return full;
+        }
+      });
 
-          // 替换 HTML 中的引用
-          html = html.replace(match[0], match[0].replace(
-            /src="data:[^"]+"/,
-            `src="./images/${imgName}"`
-          ));
-        } catch {}
-        imgIndex++;
-      }
+      totalSkipped += imgSkipped;
 
       // 保存 HTML（图片引用已替换为相对路径）
       writeFileSync(join(dir, "index.html"), html, "utf-8");
 
       // 保存变体 HTML
       if (entry.variants && Array.isArray(entry.variants)) {
-        for (const v of entry.variants) {
+        for (const v of entry.variants.slice(0, MAX_VARIANTS)) {
           const vName = v.name.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, "-").slice(0, 30);
           writeFileSync(join(dir, `variant-${vName}.html`), v.html || "", "utf-8");
         }
@@ -79,12 +102,7 @@ export async function POST(request: NextRequest) {
       writeFileSync(join(dir, "meta.json"), JSON.stringify(meta, null, 2), "utf-8");
     }
 
-    // 清理旧的 "无标题" 导出（之前没图片的）
-    for (const entry of entries) {
-      if (entry.title === "(无标题)") continue;
-    }
-
-    return NextResponse.json({ ok: true, count: entries.length, totalImages });
+    return NextResponse.json({ ok: true, count: entries.length, totalImages, skippedImages: totalSkipped });
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }

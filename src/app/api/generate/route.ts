@@ -29,6 +29,8 @@ function sanitizeProductName(description: string, taskId: string): string {
 type TaskImage = { name: string; base64: string; mime: string };
 type Task = {
   status: "running" | "done" | "error" | "queued";
+  /** 任务归属用户（安全 H5：轮询/取消必须校验，防止横向读取或取消他人任务） */
+  userId?: string;
   /** 任务产出目录（轮询时实时扫描已产出图片用） */
   workDir?: string;
   /** agent 写的人类可读进度（progress.log 最近 N 行） */
@@ -128,7 +130,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
   let actualOutputDir = outputDir;
 
   if (!existsSync(scriptPath)) {
-    tasks.set(taskId, { status: "error", workDir, error: "恢复失败：缺少 run.sh", log: "" });
+    tasks.set(taskId, { status: "error", userId, workDir, error: "恢复失败：缺少 run.sh", log: "" });
     taskStore.markError(taskId, "恢复失败：缺少 run.sh");
     releaseSlot();
     return;
@@ -136,6 +138,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
 
   tasks.set(taskId, {
     status: "running",
+    userId,
     workDir,
     log: "",
     productName: tasks.get(taskId)?.productName || undefined,
@@ -155,7 +158,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     if (settled) return;
     settled = true;
     children.delete(taskId);
-    tasks.set(taskId, { status, workDir, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
+    tasks.set(taskId, { status, userId, workDir, html, images, variants, preference_signal: signal, productName, error: errMsg, log: logBuffer.slice(-5000) });
     // 数据库持久化：完成/失败都保留记录（历史 + 审计）
     if (status === "done") {
       const base = userBase(userId);
@@ -337,7 +340,7 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
     if (code !== 0 && attempts < getSettingInt("maxAgentAttempts", 2)) {
       console.log(`[hermes-cli] Task ${taskId} 失败（exit=${code}），自动重试 ${attempts}/${getSettingInt("maxAgentAttempts", 2)}`);
       taskStore.bumpAttempts(taskId);
-      tasks.set(taskId, { status: "queued", workDir, log: logBuffer.slice(-2000) });
+      tasks.set(taskId, { status: "queued", userId, workDir, log: logBuffer.slice(-2000) });
       queue.unshift({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) }); // 重试优先
       releaseSlot(); // 释放槽位 → tryProcessQueue 立即拉起重试
       return;
@@ -720,13 +723,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 稳定性 P0：配额（全局 + 每用户）——仅在任务校验通过、即将创建时消耗
-    const quota = consumeQuota(userId);
-    if (!quota.ok) {
-      return NextResponse.json({ error: quota.reason }, { status: 429 });
-    }
-
     // 积分真实扣减（按模式取单价；失败则不创建任务）
+    // 顺序说明：先扣积分再消耗配额 —— 否则积分不足（402）也会白烧一次全局配额。
     const creditReason = mode === "single" ? "task.single" : "task.detail";
     const creditCost = creditCostFor(creditReason);
     const credit = consumeCredits(userId, creditCost, creditReason, taskId);
@@ -737,6 +735,15 @@ export async function POST(request: NextRequest) {
       );
     }
     console.log(`[credits] ${userId} 消耗 ${creditCost} 分（${creditReason}），余额 ${credit.balance}`);
+
+    // 稳定性 P0：配额（全局 + 每用户）——仅在任务校验通过、即将创建时消耗
+    // 配额不足则回滚刚扣的积分（幂等退款，并回滚对应代理佣金）
+    const quota = consumeQuota(userId);
+    if (!quota.ok) {
+      const refund = refundTaskCredits(userId, taskId);
+      logAudit(userId, "task.quota_reject", { taskId, reason: quota.reason, refunded: refund.refunded });
+      return NextResponse.json({ error: quota.reason }, { status: 429 });
+    }
 
     // 持久化任务元数据
     taskStore.add({
@@ -785,7 +792,7 @@ export async function POST(request: NextRequest) {
 
     // 检查并发
     if (activeCount >= curConcurrent()) {
-      tasks.set(taskId, { status: "queued", workDir, queuePosition: 1, log: "" });
+      tasks.set(taskId, { status: "queued", userId, workDir, queuePosition: 1, log: "" });
       queue.push({ taskId, startFn: () => spawnAgent(taskId, workDir, customTemplateId, userId) });
       updateQueuePositions();
       return NextResponse.json({ taskId, queued: true, queuePosition: 1 });
@@ -814,11 +821,32 @@ function readProgressLines(workDir: string | undefined, maxLines = 10): string[]
   }
 }
 
+/** 任务归属解析（安全 H5）：优先内存记录，回落 DB（重启前创建的老任务） */
+function resolveTaskOwner(taskId: string, memUserId?: string): string {
+  if (memUserId) return memUserId;
+  try {
+    return taskStore.get(taskId)?.userId || "";
+  } catch {
+    return "";
+  }
+}
+
+/** 是否允许该调用者访问任务：本人或 admin（admin 可查全部，与产出中心一致） */
+function canAccessTask(taskId: string, memUserId: string | undefined, callerId: string): boolean {
+  if (callerId === "admin") return true;
+  const owner = resolveTaskOwner(taskId, memUserId);
+  return !!owner && owner === callerId;
+}
+
 export async function GET(request: NextRequest) {
   const taskId = request.nextUrl.searchParams.get("taskId");
   if (!taskId) return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
   const task = tasks.get(taskId);
   if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  // 归属校验：非本人（且非 admin）一律按"不存在"处理，不泄露任务是否存在
+  if (!canAccessTask(taskId, task.userId, request.headers.get("x-user-id") || "admin")) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
   if (tasks.size > 100) {
     const keys = [...tasks.keys()];
     for (let i = 0; i < keys.length - 100; i++) tasks.delete(keys[i]);
@@ -868,13 +896,17 @@ export async function DELETE(request: NextRequest) {
   if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
   const userId = request.headers.get("x-user-id") || "admin";
+  // 归属校验：不能取消他人任务
+  if (!canAccessTask(taskId, task.userId, userId)) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
   logAudit(userId, "task.cancel", { taskId, status: task.status });
 
   if (task.status === "queued") {
     // 从排队队列移除
     const idx = queue.findIndex((q) => q.taskId === taskId);
     if (idx !== -1) queue.splice(idx, 1);
-    tasks.set(taskId, { status: "error", error: "任务已取消", log: task.log });
+    tasks.set(taskId, { status: "error", userId: task.userId, error: "任务已取消", log: task.log });
     taskStore.markError(taskId, "任务已取消");
     return NextResponse.json({ ok: true, canceled: true });
   }
@@ -948,7 +980,7 @@ function recoverCompletedOutput(
   const pending = taskStore.getRecoverable();
   for (const t of pending) {
     if (!existsSync(join(t.workDir, "run.sh"))) {
-      tasks.set(t.taskId, { status: "error", workDir: t.workDir, error: "任务数据已丢失", log: "" });
+      tasks.set(t.taskId, { status: "error", userId: t.userId, workDir: t.workDir, error: "任务数据已丢失", log: "" });
       taskStore.remove(t.taskId);
       logAudit(t.userId, "task.error", { taskId: t.taskId, error: "任务数据已丢失（恢复时）" });
       continue;
@@ -957,7 +989,7 @@ function recoverCompletedOutput(
     // 如果 output/index.html 或 index.html 已存在，说明 Agent 已完成 → 标记完成并入历史
     if (recoverCompletedOutput(t, false)) continue;
 
-    tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", workDir: t.workDir, log: "" });
+    tasks.set(t.taskId, { status: t.status === "queued" ? "queued" : "running", userId: t.userId, workDir: t.workDir, log: "" });
     // 恢复重新拉起 Agent 的审计
     logAudit(t.userId, "task.resume", { taskId: t.taskId, workDir: t.workDir });
 
@@ -970,7 +1002,7 @@ function recoverCompletedOutput(
       activeCount++;
       spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId);
     } else {
-      tasks.set(t.taskId, { status: "queued", workDir: t.workDir, queuePosition: 1, log: "" });
+      tasks.set(t.taskId, { status: "queued", userId: t.userId, workDir: t.workDir, queuePosition: 1, log: "" });
       queue.push({ taskId: t.taskId, startFn: () => spawnAgent(t.taskId, t.workDir, t.customTemplateId, t.userId) });
     }
   }

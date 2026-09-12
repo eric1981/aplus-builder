@@ -217,15 +217,23 @@ class TaskStore {
   }
 
   /** 按产出目录名读取预测（历史恢复用）；支持 admin 视角的 "<userId>/<dirName>" 前缀形式 */
-  getPredictionByDir(dirName: string): Record<string, unknown> | null {
+  /**
+   * 按目录名取市场预测。
+   * 安全 Medium：此前不带 user_id 过滤，dir_name 相同（或取最后一段后相同）时会跨租户读到
+   * 他人的预测结果。现支持传入 userId 限定范围；不传（admin）时才全局匹配。
+   */
+  getPredictionByDir(dirName: string, userId?: string): Record<string, unknown> | null {
     try {
       const find = (dir: string) =>
         db
           .prepare(
-            `SELECT prediction FROM tasks WHERE dir_name = ? AND prediction IS NOT NULL
-             ORDER BY created_at DESC LIMIT 1`,
+            userId
+              ? `SELECT prediction FROM tasks WHERE dir_name = ? AND user_id = ? AND prediction IS NOT NULL
+                 ORDER BY created_at DESC LIMIT 1`
+              : `SELECT prediction FROM tasks WHERE dir_name = ? AND prediction IS NOT NULL
+                 ORDER BY created_at DESC LIMIT 1`,
           )
-          .get(dir) as { prediction: string | null } | undefined;
+          .get(...(userId ? [dir, userId] : [dir])) as { prediction: string | null } | undefined;
       // 1) 精确匹配（普通用户视角：dir_name 无前缀）
       let row = find(dirName);
       // 2) admin 视角带 "<userId>/" 前缀 → 取最后一段再匹配（预测存在真实任务行上）
