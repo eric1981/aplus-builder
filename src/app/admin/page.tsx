@@ -61,9 +61,28 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [settings, setSettings] = useState<SettingItem[]>([]);
-  const [tab, setTab] = useState<"users" | "audit" | "settings" | "affiliate">(
-    () => (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "affiliate" ? "affiliate" : "users"),
+  const [tab, setTab] = useState<"users" | "audit" | "settings" | "affiliate" | "orders">(
+    () => {
+      if (typeof window === "undefined") return "users";
+      const t = new URLSearchParams(window.location.search).get("tab");
+      return t === "affiliate" || t === "orders" ? t : "users";
+    },
   );
+
+  // 订单 / 充值（manual 通道：人工确认到账 + 退款）
+  interface AdminOrder {
+    id: string; userId: string; credits: number; amountCents: number; currency: string;
+    provider: string; status: "pending" | "paid" | "refunded" | "canceled";
+    externalId: string | null; note: string | null; createdAt: number; paidAt: number | null; refundedAt: number | null;
+  }
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [orderSummary, setOrderSummary] = useState<{
+    paidCount: number; paidAmountCents: number; paidCredits: number;
+    refundedCount: number; refundedAmountCents: number; pendingCount: number;
+  } | null>(null);
+  const [payEvents, setPayEvents] = useState<Record<string, unknown>[]>([]);
+  const [orderFilter, setOrderFilter] = useState<"" | "pending" | "paid" | "refunded" | "canceled">("");
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
 
   // 分销管理
   const [agents, setAgents] = useState<{
@@ -234,6 +253,77 @@ export default function AdminPage() {
     if (tab === "affiliate" && !affiliateLoaded) loadAffiliate();
   }, [tab, affiliateLoaded]);
 
+  const loadOrders = async () => {
+    try {
+      const q = orderFilter ? `&status=${orderFilter}` : "";
+      const res = await apiFetch(`/api/admin/orders?limit=100&events=1${q}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      setOrders(d.orders || []);
+      setOrderSummary(d.summary || null);
+      setPayEvents(d.events || []);
+      setOrdersLoaded(true);
+    } catch {}
+  };
+
+  /** 管理员对订单的操作：markPaid / refund / cancel */
+  const orderAction = async (order: AdminOrder, action: "markPaid" | "refund" | "cancel") => {
+    setMsg(null);
+    const yuan = (order.amountCents / 100).toFixed(2);
+    let externalId: string | undefined;
+    if (action === "markPaid") {
+      externalId = window.prompt(
+        `确认订单 ${order.id}\n用户 ${order.userId} 充值 ${order.credits} 积分（¥${yuan}）\n\n请填写收款凭证（转账单号/备注，可留空）：`,
+        "",
+      ) ?? undefined;
+      if (externalId === undefined) return;
+    } else if (action === "refund") {
+      if (!window.confirm(`退款订单 ${order.id}？将回收 ${order.credits} 积分（余额不足会被拒绝）：`)) return;
+    } else if (!window.confirm(`取消订单 ${order.id}？`)) return;
+
+    try {
+      const res = await apiFetch("/api/admin/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, orderId: order.id, externalId: externalId || undefined }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setMsg({ type: "err", text: d.error || "操作失败" }); return; }
+      if (action === "markPaid") {
+        setMsg({ type: "ok", text: d.credited ? `已确认到账，+${order.credits} 积分` : "该订单已入账（重复确认已忽略）" });
+      } else if (action === "refund") {
+        setMsg({ type: "ok", text: d.revoked ? `已退款并回收 ${d.revoked} 积分` : "订单已退款（重复操作已忽略）" });
+      } else {
+        setMsg({ type: "ok", text: "订单已取消" });
+      }
+      setOrdersLoaded(false);
+      loadOrders();
+      load();
+    } catch { setMsg({ type: "err", text: "网络错误" }); }
+  };
+
+  /** 轮换某用户的 API token（明文仅显示一次） */
+  const rotateToken = async (u: { id: string; name: string }) => {
+    if (!window.confirm(`为 ${u.name} 生成新的 API token？旧 token 立即失效（仅影响脚本调用，不影响网页登录）。`)) return;
+    try {
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(u.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rotateApiToken: true }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.apiToken) { setMsg({ type: "err", text: d.error || "轮换失败" }); return; }
+      window.prompt(`新的 API token（仅显示这一次，请立即复制保存）：`, d.apiToken);
+      setMsg({ type: "ok", text: `${u.name} 的 API token 已轮换` });
+      load();
+    } catch { setMsg({ type: "err", text: "网络错误" }); }
+  };
+
+  useEffect(() => {
+    if (tab === "orders") { setOrdersLoaded(false); loadOrders(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, orderFilter]);
+
   const markAgent = async (u: { id: string; name: string }, isAgent: boolean) => {
     setMsg(null);
     if (!isAgent && !window.confirm(`取消 ${u.name} 的代理身份？其名下绑定关系保留但不再计入收益。`)) return;
@@ -391,10 +481,10 @@ export default function AdminPage() {
 
         {/* Tab */}
         <div className="flex gap-2">
-          {(["users", "settings", "audit", "affiliate"] as const).map((t) => (
+          {(["users", "orders", "settings", "audit", "affiliate"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${tab === t ? "bg-accent text-accent-on border-accent" : "bg-white text-muted border-border"}`}>
-              {t === "users" ? "用户管理" : t === "settings" ? "系统设置" : t === "affiliate" ? "分销管理" : "审计日志"}
+              {t === "users" ? "用户管理" : t === "orders" ? "订单/充值" : t === "settings" ? "系统设置" : t === "affiliate" ? "分销管理" : "审计日志"}
             </button>
           ))}
         </div>
@@ -530,12 +620,159 @@ export default function AdminPage() {
                             </>
                           )}
                           <button onClick={() => resetPassword(u)} className="text-text-muted hover:text-accent">重置密码</button>
+                          <button onClick={() => rotateToken(u)} className="text-text-muted hover:text-accent" title="为脚本调用生成新的 API token">轮换 Token</button>
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {tab === "orders" && (
+          <div className="space-y-6">
+            {/* 汇总 */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="bg-white rounded-xl border border-border p-4">
+                <p className="text-xs text-text-muted">已收款</p>
+                <p className="text-xl font-semibold mt-1">¥{((orderSummary?.paidAmountCents || 0) / 100).toFixed(2)}</p>
+                <p className="text-[11px] text-text-muted mt-0.5">{orderSummary?.paidCount || 0} 笔 · {orderSummary?.paidCredits || 0} 积分</p>
+              </div>
+              <div className="bg-white rounded-xl border border-border p-4">
+                <p className="text-xs text-text-muted">待确认</p>
+                <p className={`text-xl font-semibold mt-1 ${(orderSummary?.pendingCount || 0) > 0 ? "text-orange-500" : ""}`}>{orderSummary?.pendingCount || 0}</p>
+                <p className="text-[11px] text-text-muted mt-0.5">线下收款后点「确认到账」</p>
+              </div>
+              <div className="bg-white rounded-xl border border-border p-4">
+                <p className="text-xs text-text-muted">已退款</p>
+                <p className="text-xl font-semibold mt-1">¥{((orderSummary?.refundedAmountCents || 0) / 100).toFixed(2)}</p>
+                <p className="text-[11px] text-text-muted mt-0.5">{orderSummary?.refundedCount || 0} 笔</p>
+              </div>
+              <div className="bg-white rounded-xl border border-border p-4">
+                <p className="text-xs text-text-muted">回调事件</p>
+                <p className="text-xl font-semibold mt-1">{payEvents.length}</p>
+                <p className="text-[11px] text-text-muted mt-0.5">最近 100 条（含验签失败）</p>
+              </div>
+            </div>
+
+            {/* 筛选 + 刷新 */}
+            <div className="flex flex-wrap items-center gap-2">
+              {([["", "全部"], ["pending", "待确认"], ["paid", "已到账"], ["refunded", "已退款"], ["canceled", "已取消"]] as const).map(([v, label]) => (
+                <button key={v} onClick={() => setOrderFilter(v)}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium border ${orderFilter === v ? "bg-accent text-accent-on border-accent" : "bg-white text-muted border-border"}`}>
+                  {label}
+                </button>
+              ))}
+              <button onClick={() => loadOrders()} className="ml-auto text-xs text-blue-600 hover:text-blue-800">刷新</button>
+            </div>
+
+            {/* 订单表 */}
+            <div className="bg-white rounded-xl border border-border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs text-text-muted">
+                  <tr>
+                    <th className="px-4 py-2">订单号</th>
+                    <th className="px-4 py-2">用户</th>
+                    <th className="px-4 py-2">积分</th>
+                    <th className="px-4 py-2">金额</th>
+                    <th className="px-4 py-2">通道</th>
+                    <th className="px-4 py-2">状态</th>
+                    <th className="px-4 py-2">收款凭证</th>
+                    <th className="px-4 py-2">时间</th>
+                    <th className="px-4 py-2">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {orders.length === 0 && (
+                    <tr><td colSpan={9} className="px-4 py-6 text-center text-xs text-text-muted">
+                      {ordersLoaded ? "暂无订单（用户在「充值」页下单后会出现在这里）" : "加载中…"}
+                    </td></tr>
+                  )}
+                  {orders.map((o) => (
+                    <tr key={o.id}>
+                      <td className="px-4 py-2">
+                        <span className="font-mono text-xs">{o.id}</span>
+                        <button onClick={() => { navigator.clipboard?.writeText(o.id); }}
+                          className="ml-2 text-[11px] text-text-muted hover:text-accent">复制</button>
+                      </td>
+                      <td className="px-4 py-2 text-xs">{o.userId}</td>
+                      <td className="px-4 py-2 font-medium">{o.credits}</td>
+                      <td className="px-4 py-2">¥{(o.amountCents / 100).toFixed(2)}</td>
+                      <td className="px-4 py-2 text-xs text-text-muted">{o.provider === "manual" ? "线下/人工" : o.provider}</td>
+                      <td className="px-4 py-2 text-xs">
+                        <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                          o.status === "paid" ? "bg-green-50 text-green-700"
+                          : o.status === "pending" ? "bg-orange-50 text-orange-600"
+                          : o.status === "refunded" ? "bg-gray-100 text-text-muted"
+                          : "bg-gray-100 text-text-muted"
+                        }`}>
+                          {o.status === "paid" ? "已到账" : o.status === "pending" ? "待确认" : o.status === "refunded" ? "已退款" : "已取消"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-text-muted font-mono">{o.externalId || "—"}</td>
+                      <td className="px-4 py-2 text-xs text-text-muted">
+                        {new Date(o.createdAt).toLocaleString("zh-CN")}
+                        {o.paidAt && <div>到账 {new Date(o.paidAt).toLocaleString("zh-CN")}</div>}
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex gap-2 text-xs whitespace-nowrap">
+                          {o.status === "pending" && (
+                            <>
+                              <button onClick={() => orderAction(o, "markPaid")} className="text-green-600 hover:text-green-800">确认到账</button>
+                              <button onClick={() => orderAction(o, "cancel")} className="text-text-muted hover:text-accent">取消</button>
+                            </>
+                          )}
+                          {o.status === "paid" && (
+                            <button onClick={() => orderAction(o, "refund")} className="text-red-500 hover:text-red-700">退款</button>
+                          )}
+                          {(o.status === "refunded" || o.status === "canceled") && <span className="text-text-muted">—</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 回调事件流 */}
+            <div className="bg-white rounded-xl border border-border overflow-x-auto">
+              <div className="px-4 py-3 border-b border-border text-sm font-medium">支付回调事件（最近 100 条）</div>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs text-text-muted">
+                  <tr>
+                    <th className="px-4 py-2">时间</th>
+                    <th className="px-4 py-2">通道</th>
+                    <th className="px-4 py-2">事件</th>
+                    <th className="px-4 py-2">订单</th>
+                    <th className="px-4 py-2">验签</th>
+                    <th className="px-4 py-2">已生效</th>
+                    <th className="px-4 py-2">备注</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {payEvents.length === 0 && (
+                    <tr><td colSpan={7} className="px-4 py-6 text-center text-xs text-text-muted">暂无回调事件</td></tr>
+                  )}
+                  {payEvents.slice(0, 30).map((e, i) => (
+                    <tr key={i}>
+                      <td className="px-4 py-2 text-xs text-text-muted">{new Date(Number(e.created_at)).toLocaleString("zh-CN")}</td>
+                      <td className="px-4 py-2 text-xs">{String(e.provider || "")}</td>
+                      <td className="px-4 py-2 text-xs font-mono">{String(e.event_type || "")}</td>
+                      <td className="px-4 py-2 text-xs font-mono">{e.order_id ? String(e.order_id) : "—"}</td>
+                      <td className="px-4 py-2 text-xs">{Number(e.signature_ok) ? "✓" : <span className="text-red-500">✗</span>}</td>
+                      <td className="px-4 py-2 text-xs">{Number(e.applied) ? "✓" : "—"}</td>
+                      <td className="px-4 py-2 text-xs text-text-muted">{e.reason ? String(e.reason).slice(0, 40) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="text-xs text-text-muted leading-relaxed">
+              manual 通道流程：用户在「充值」页下单 → 线下收款 → 在这里点「确认到账」入账积分（可填收款凭证号）。<br />
+              接入微信/支付宝后，回调会自动走 /api/payments/webhook（验签 + 幂等），订单会自行变为「已到账」。
             </div>
           </div>
         )}
