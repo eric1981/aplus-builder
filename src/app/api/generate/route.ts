@@ -7,7 +7,7 @@ import { taskStore } from "./task-store";
 import { db } from "@/lib/db";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
-import { consumeCredits, creditCostFor } from "@/lib/credits";
+import { consumeCredits, creditCostFor, refundTaskCredits } from "@/lib/credits";
 import { getAgentHome, getAgentTimeoutMs, userBase } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { screenshotPage } from "@/lib/screenshot";
@@ -174,6 +174,19 @@ function spawnAgent(taskId: string, workDir: string, customTemplateId: string | 
       // 失败审计（"任务已取消"已在 DELETE 审计，不重复记录）
       if (errMsg !== "任务已取消") {
         logAudit(userId, "task.error", { taskId, error: errMsg || "任务失败" });
+      }
+      // 失败/超时/取消：自动退还本次消耗的积分（幂等，同一任务只退一次）
+      if (getSettingBool("refundOnFailure")) {
+        const refund = refundTaskCredits(userId, taskId);
+        if (refund.refunded > 0) {
+          logAudit(userId, "task.refund", {
+            taskId,
+            amount: refund.refunded,
+            balance: refund.balance,
+            error: errMsg || "任务失败",
+          });
+          console.log(`[credits] 任务失败退款 ${refund.refunded} 分给 ${userId}（taskId=${taskId}），余额 ${refund.balance}`);
+        }
       }
     }
     releaseSlot();

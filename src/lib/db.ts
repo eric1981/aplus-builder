@@ -51,11 +51,53 @@ export function openDb(): DatabaseSync {
 
 export const db = openDb();
 
+/**
+ * 事务包装（安全 P0-5）：多语句写操作必须原子，否则中途失败会留下
+ * 「扣了积分没流水」「建了用户没赠送流水」这类账目不一致。
+ * 注意：fn 必须同步（node:sqlite 为同步 API），且不要嵌套调用。
+ */
+export function withTx<T>(fn: () => T): T {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (e) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw e;
+  }
+}
+
+/**
+ * 积分流水幂等索引：仅对「按 ref 幂等」的流水类型生效
+ * （payment.credit = 支付入账、task.refund = 任务失败退款），
+ * 保证同一笔外部流水/同一个任务不会被重复入账。
+ *
+ * 刻意不做 (reason, ref) 全域唯一：admin.topup 的 ref 是备注文本，
+ * 两次充值会撞唯一约束。存量数据若已有重复，索引创建失败也不阻断启动。
+ */
+function ensureLedgerIdempotencyIndex() {
+  try {
+    db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_idem ON credit_ledger(reason, ref)
+       WHERE ref IS NOT NULL AND reason IN ('payment.credit', 'task.refund')`,
+    );
+  } catch (e) {
+    console.warn(
+      "[db] 流水幂等索引创建失败（不影响启动）：",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
 /** 安全初始化：schema + 存量列升级 + 旧数据迁移，均带锁重试 */
 function safeInit() {
   withRetry(() => initSchema());
   withRetry(() => ensureUserColumns());
   withRetry(() => ensureTasksColumns());
+  withRetry(() => ensureLedgerIdempotencyIndex());
 }
 
 export function initSchema() {

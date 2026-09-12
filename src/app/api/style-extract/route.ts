@@ -6,7 +6,7 @@ import { randomUUID } from "crypto";
 import { getCustomer } from "@/lib/customer-store";
 import { validateImageBlob } from "@/lib/upload-validate";
 import { consumeQuota, checkRateLimit, clientIp } from "@/lib/limits";
-import { consumeCredits, creditCostFor } from "@/lib/credits";
+import { consumeCredits, creditCostFor, refundTaskCredits } from "@/lib/credits";
 import { onTemplateCreated, migrateLegacyTemplates } from "@/lib/style-templates";
 import { getAgentHome, getStyleTimeoutMs, OUTPUT_BASE } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
@@ -228,6 +228,13 @@ export async function POST(request: NextRequest) {
       // 复刻成功：注册模板（归属当前用户）+ 后台生成缩略图
       if (status === "done") {
         onTemplateCreated(taskId, userId).catch(() => {});
+      } else if (getSettingBool("refundOnFailure")) {
+        // 复刻失败/超时：退还本次消耗的积分（幂等，同一任务只退一次）
+        const refund = refundTaskCredits(userId, taskId);
+        if (refund.refunded > 0) {
+          logAudit(userId, "style.refund", { taskId, amount: refund.refunded, error: errMsg });
+          console.log(`[credits] 复刻失败退款 ${refund.refunded} 分给 ${userId}（taskId=${taskId}），余额 ${refund.balance}`);
+        }
       }
     };
 
