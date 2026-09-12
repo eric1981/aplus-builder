@@ -3,11 +3,26 @@
  *
  * - 单层：客户（user）→ 代理（agent）
  * - 绑定来源：qr（扫码注册，未来）/ manual（管理员手动）
- * - 收益 = 名下客户累计消耗积分 × 分成比例（settings.agentCommissionPercent）
- *   暂为记账展示，不涉及真实资金结算
+ * - 收益：**逐笔固化**。客户每次消耗积分时，按"当时"的比例写一条 commission_ledger
+ *   （base_amount / rate / amount / consumption_ref），汇总只读该表。
+ *   这样管理员事后调整分成比例，不会篡改历史收益（此前是实时用当前比例重算）。
+ * - 消耗已退款（refundOnFailure）→ 对应佣金置 reversed=1，不再计入收益
+ * - 暂为记账展示，不涉及真实资金结算
  */
 import { db } from "@/lib/db";
 import { getSettingInt } from "@/lib/settings";
+
+/** 计入佣金基数的消耗原因（排除 admin.deduct 等管理动作与充值） */
+export const CONSUMPTION_REASONS = ["task.detail", "task.single", "style_extract"] as const;
+
+function isConsumptionReason(reason: string): boolean {
+  return (CONSUMPTION_REASONS as readonly string[]).includes(reason);
+}
+
+/** 当前分成比例（写入侧已限 0–100，这里再兜底夹取一次） */
+export function currentCommissionPercent(): number {
+  return Math.max(0, Math.min(100, getSettingInt("agentCommissionPercent", 10)));
+}
 
 export interface Referral {
   userId: string;
@@ -42,12 +57,33 @@ export function setAgentFlag(userId: string, isAgent: boolean): { agentCode?: st
   return {};
 }
 
-/** 绑定/改绑：客户 → 代理（管理员手动） */
+/** 绑定/改绑：客户 → 代理（管理员手动）。带校验，防止自绑定/绑到非代理/成环 */
 export function setReferral(userId: string, agentId: string | null, note?: string): void {
   if (!agentId) {
     db.prepare(`DELETE FROM referrals WHERE user_id = ?`).run(userId);
     return;
   }
+  if (agentId === userId) throw new Error("不能把客户绑定到自己");
+
+  const agent = db
+    .prepare(`SELECT is_agent, disabled FROM users WHERE id = ?`)
+    .get(agentId) as { is_agent: number; disabled: number } | undefined;
+  if (!agent) throw new Error("代理不存在");
+  if (Number(agent.disabled)) throw new Error("该代理已被禁用");
+  if (!Number(agent.is_agent)) throw new Error("目标用户尚未标记为代理，请先在分销管理中标记");
+
+  const client = db
+    .prepare(`SELECT role, disabled FROM users WHERE id = ?`)
+    .get(userId) as { role: string; disabled: number } | undefined;
+  if (!client) throw new Error("客户不存在");
+  if (client.role === "admin") throw new Error("不能把管理员绑定为代理客户");
+
+  // 防成环：若目标代理本身是当前客户的代理客户（A→B 且 B→A），拒绝
+  const reverse = db
+    .prepare(`SELECT agent_id FROM referrals WHERE user_id = ?`)
+    .get(agentId) as { agent_id: string } | undefined;
+  if (reverse?.agent_id === userId) throw new Error("会形成互相绑定，已拒绝");
+
   const now = Date.now();
   db.prepare(
     `INSERT INTO referrals (user_id, agent_id, source, note, created_at, updated_at)
@@ -58,6 +94,54 @@ export function setReferral(userId: string, agentId: string | null, note?: strin
        note = excluded.note,
        updated_at = excluded.updated_at`,
   ).run(userId, agentId, note || null, now, now);
+}
+
+/**
+ * 计提佣金（消耗成功时调用）：按**当时**比例固化一条佣金流水。
+ * 幂等：同一客户 + 同一消耗 ref 只计提一次（重复调用静默忽略）。
+ */
+export function accrueCommission(
+  clientId: string,
+  baseAmount: number,
+  reason: string,
+  ref?: string,
+): void {
+  try {
+    if (!isConsumptionReason(reason)) return;
+    const amount = Math.trunc(baseAmount);
+    if (amount <= 0) return;
+
+    const agent = getReferralAgent(clientId);
+    if (!agent) return;
+    if (agent.agentId === clientId) return; // 自绑定（防御，正常情况下已被 setReferral 拒绝）
+    const agentRow = db
+      .prepare(`SELECT is_agent, disabled FROM users WHERE id = ?`)
+      .get(agent.agentId) as { is_agent: number; disabled: number } | undefined;
+    if (!agentRow || !Number(agentRow.is_agent) || Number(agentRow.disabled)) return;
+
+    const rate = currentCommissionPercent();
+    const commission = Math.round((amount * rate) / 100);
+    if (commission <= 0) return;
+
+    db.prepare(
+      `INSERT INTO commission_ledger
+         (agent_id, client_id, consumption_ref, reason, base_amount, rate, amount, reversed, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    ).run(agent.agentId, clientId, ref || null, reason, amount, rate, commission, Date.now());
+  } catch {
+    // 唯一索引冲突（已计提）或库异常：不影响主流程
+  }
+}
+
+/** 消耗已退款 → 撤销对应佣金计提（保留流水，置 reversed=1） */
+export function reverseCommission(clientId: string, ref?: string): void {
+  if (!ref) return;
+  try {
+    db.prepare(
+      `UPDATE commission_ledger SET reversed = 1
+       WHERE client_id = ? AND consumption_ref = ? AND reversed = 0`,
+    ).run(clientId, ref);
+  } catch {}
 }
 
 /** 查某客户的代理（无则 null） */
@@ -92,8 +176,9 @@ export function listAgentClients(agentId: string): {
       .prepare(
         `SELECT r.user_id, u.name AS user_name, u.email, u.credits,
                 r.source, r.created_at,
-                COALESCE((SELECT SUM(l.delta) FROM credit_ledger l
-                          WHERE l.user_id = r.user_id AND l.delta < 0), 0) AS consumed
+                COALESCE((SELECT SUM(-l.delta) FROM credit_ledger l
+                          WHERE l.user_id = r.user_id AND l.delta < 0
+                            AND l.reason IN ('task.detail','task.single','style_extract')), 0) AS consumed
          FROM referrals r LEFT JOIN users u ON u.id = r.user_id
          WHERE r.agent_id = ?
          ORDER BY r.created_at DESC`,
@@ -121,22 +206,36 @@ export function listAgentClients(agentId: string): {
   }
 }
 
-/** 代理收益汇总：客户数 + 总消耗 + 按比例折算收益（记账值） */
+/**
+ * 代理收益汇总：客户数 + 总消耗 + **已固化佣金合计**（记账值）
+ *
+ * estimatedEarning 现在是 commission_ledger 里已计提且未撤销的佣金合计，
+ * 不再用"当前比例 × 历史消耗"实时重算。
+ */
 export function agentSummary(agentId: string): {
   clientCount: number;
   totalConsumed: number;
   commissionPercent: number;
-  estimatedEarning: number; // 积分口径（非真实货币）
+  estimatedEarning: number; // 已计提佣金（积分口径，非真实货币）
   clients: ReturnType<typeof listAgentClients>;
 } {
   const clients = listAgentClients(agentId);
   const totalConsumed = clients.reduce((s, c) => s + c.consumed, 0);
-  const pct = Math.max(0, Math.min(100, getSettingInt("agentCommissionPercent", 10)));
+  let accrued = 0;
+  try {
+    const row = db
+      .prepare(
+        `SELECT COALESCE(SUM(amount), 0) AS earnings, COALESCE(SUM(base_amount), 0) AS base
+         FROM commission_ledger WHERE agent_id = ? AND reversed = 0`,
+      )
+      .get(agentId) as { earnings: number; base: number } | undefined;
+    accrued = Number(row?.earnings || 0);
+  } catch {}
   return {
     clientCount: clients.length,
     totalConsumed,
-    commissionPercent: pct,
-    estimatedEarning: Math.round((totalConsumed * pct) / 100),
+    commissionPercent: currentCommissionPercent(),
+    estimatedEarning: accrued,
     clients,
   };
 }

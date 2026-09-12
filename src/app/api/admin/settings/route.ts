@@ -41,6 +41,11 @@ export async function PUT(request: NextRequest) {
         errors.push(`${def.label} 必须是非负数字`);
         continue;
       }
+      // 分成比例必须落在 0–100（>100 会让代理收益超过客户实际消耗）
+      if (def.key === "agentCommissionPercent" && n > 100) {
+        errors.push(`${def.label} 必须在 0–100 之间`);
+        continue;
+      }
       // 防止误设 0 导致全局不可用（并发/超时类至少为 1）
       if (def.group === "concurrency" || def.key === "agentTimeoutMinutes" || def.key === "styleTimeoutMinutes") {
         if (n < 1) {

@@ -201,6 +201,26 @@ export function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_referrals_agent ON referrals(agent_id);
 
+    -- 代理佣金流水（安全 P0-6）：消耗发生时按**当时**比例逐笔固化，
+    -- 避免"实时用当前比例重算历史收益"导致改比例即篡改历史。
+    -- reversed=1 表示对应消耗已退款（不再计入收益，但保留审计痕迹）。
+    CREATE TABLE IF NOT EXISTS commission_ledger (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id        TEXT NOT NULL,
+      client_id       TEXT NOT NULL,
+      consumption_ref TEXT,                    -- 关联消耗（taskId）
+      reason          TEXT,                    -- 消耗原因
+      base_amount     INTEGER NOT NULL,        -- 该笔消耗积分（正数）
+      rate            INTEGER NOT NULL,        -- 计提时的分成比例 %
+      amount          INTEGER NOT NULL,        -- 固化的佣金积分
+      reversed        INTEGER NOT NULL DEFAULT 0,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commission_agent ON commission_ledger(agent_id, created_at);
+    -- 幂等：同一客户的同一笔消耗只计提一次佣金（consumption_ref 为空的手工补录不受限）
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_commission_ref
+      ON commission_ledger(client_id, consumption_ref) WHERE consumption_ref IS NOT NULL;
+
     -- 复刻风格模板元数据（customer-templates/*.html）
     -- id = 模板文件名（不含 .html，复刻模板为 taskId，手工模板为原名）
     CREATE TABLE IF NOT EXISTS style_templates (

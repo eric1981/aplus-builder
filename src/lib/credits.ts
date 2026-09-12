@@ -7,6 +7,7 @@
  */
 import { db, withTx } from "@/lib/db";
 import { getSettingInt } from "@/lib/settings";
+import { accrueCommission, reverseCommission } from "@/lib/affiliate";
 
 export type CreditResult =
   | { ok: true; balance: number; delta: number }
@@ -38,7 +39,7 @@ export function consumeCredits(
 ): CreditResult {
   if (amount <= 0) return { ok: true, balance: getCreditBalance(userId), delta: 0 };
   try {
-    return withTx<CreditResult>(() => {
+    const result = withTx<CreditResult>(() => {
       // 原子扣减：仅当余额足够（余额不可能为负）
       const r = db
         .prepare(`UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?`)
@@ -53,6 +54,9 @@ export function consumeCredits(
       ).run(userId, -amount, reason, balance, ref || null, Date.now());
       return { ok: true, balance, delta: -amount };
     });
+    // 扣减成功 → 计提代理佣金（按当时比例固化；非消耗类 reason 内部会跳过）
+    if (result.ok) accrueCommission(userId, amount, reason, ref);
+    return result;
   } catch {
     return { ok: false, reason: "积分扣减失败", balance: getCreditBalance(userId), needed: amount };
   }
@@ -109,6 +113,8 @@ export function refundTaskCredits(
     const amount = Math.max(0, Math.trunc(Number(row?.amount || 0)));
     if (amount === 0) return { refunded: 0, balance: getCreditBalance(userId) };
     const r = addCredits(userId, amount, "task.refund", taskId);
+    // 退款成功 → 撤销该笔消耗产生的佣金计提（幂等：只影响未撤销的行）
+    if (r.ok) reverseCommission(userId, taskId);
     return { refunded: r.ok ? amount : 0, balance: r.balance };
   } catch {
     return { refunded: 0, balance: getCreditBalance(userId) };
