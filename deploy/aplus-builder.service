@@ -1,0 +1,45 @@
+# systemd 服务单元（放到 /etc/systemd/system/aplus-builder.service）
+#
+# 关键点：
+# - 以专用用户 aplus 运行，HOME=/home/aplus（技能里大量使用 ~/.hermes/... 路径）
+# - 监听 127.0.0.1:3000，由 Nginx 反代并终止 TLS（不要直接暴露 3000 端口）
+# - 崩溃自动重启；环境变量来自 .env.local
+#
+# 安装：
+#   sudo cp deploy/aplus-builder.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now aplus-builder
+#   systemctl status aplus-builder --no-pager
+
+[Unit]
+Description=aplus-builder (A+ 详情页生成服务)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aplus
+Group=aplus
+WorkingDirectory=/srv/aplus-builder
+EnvironmentFile=/srv/aplus-builder/.env.local
+Environment=NODE_ENV=production
+Environment=HOME=/home/aplus
+Environment=TZ=Asia/Shanghai
+ExecStart=/usr/bin/env node /srv/aplus-builder/node_modules/next/dist/bin/next start -p 3000 -H 127.0.0.1
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/aplus-builder.log
+StandardError=append:/var/log/aplus-builder.log
+
+# 资源与安全（按 ECS 规格调整：8 vCPU 16 GiB 下这两项足够）
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+# 需要可写的目录：数据盘（产出/数据库）与家目录（hermes/技能/日志）
+ReadWritePaths=/data /home/aplus /var/log
+
+[Install]
+WantedBy=multi-user.target

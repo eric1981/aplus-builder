@@ -1,0 +1,54 @@
+# Nginx 反代配置示例（放到 /etc/nginx/sites-available/aplus-builder 并软链到 sites-enabled）
+#
+# 要点：
+# - 终止 TLS；应用侧 Cookie 的 Secure 标志依赖 X-Forwarded-Proto=https
+# - X-Forwarded-For 需透传，并在应用里设 TRUSTED_PROXY_HOPS=1，限流才能拿到真实客户端 IP
+# - 上传上限：应用默认单文件 15MB → 这里给 30m 余量
+# - 长耗时：产出预览（load-output）会同步读盘 + 生成缩略图，读超时给足
+
+upstream aplus_builder {
+    server 127.0.0.1:3000;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    server_name your-domain.com;
+    # 证书签发后可强制跳转 HTTPS（certbot 会自动加）
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+
+    # 用 certbot 签发后填这里（certbot --nginx 会自动写入）
+    ssl_certificate     /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    client_max_body_size 30m;
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript image/svg+xml;
+
+    location /_next/static/ {
+        proxy_pass http://aplus_builder;
+        proxy_cache_valid 200 7d;
+        add_header Cache-Control "public, max-age=604800, immutable";
+    }
+
+    location / {
+        proxy_pass http://aplus_builder;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+
+        # 产出预览/缩略图/大图 base64 传输较慢
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+}

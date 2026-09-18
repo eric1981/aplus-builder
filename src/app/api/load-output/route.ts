@@ -1,44 +1,31 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "fs";
 import { join, resolve, sep, relative, basename } from "path";
 import { gzipSync } from "zlib";
-import { spawnSync } from "child_process";
 import { NextRequest, NextResponse } from "next/server";
 import { userBase } from "@/lib/config";
 import { taskStore } from "@/app/api/generate/task-store";
+import { ensureThumb } from "@/lib/image-thumb";
 import { checkRateLimit } from "@/lib/limits";
 import { callerId as resolveCallerId } from "@/lib/request-user";
 
 /** 预览缩略图最长边（原图 2400px → 800px，base64 体积约 1/8，隧道/远程访问大幅提速） */
 const THUMB_MAX = 800;
-/** 缩略图目录名（与原图同目录） */
-const THUMBS_DIR = "thumbs";
 
-/** 惰性生成缩略图：sips 缩放原图到 <原图目录>/thumbs/，失败时回退原图路径 */
-function ensureThumb(originDir: string, name: string): string {
-  try {
-    const thumbsDir = join(originDir, THUMBS_DIR);
-    mkdirSync(thumbsDir, { recursive: true });
-    const thumbPath = join(thumbsDir, name);
-    if (existsSync(thumbPath)) return thumbPath;
-    const src = join(originDir, name);
-    const ext = (name.split(".").pop() || "").toLowerCase();
-    const out = ext === "png" ? thumbPath : join(thumbsDir, `${name.slice(0, name.lastIndexOf("."))}.jpg`);
-    const r = spawnSync("sips", ["-Z", String(THUMB_MAX), "-s", "format", ext === "png" ? "png" : "jpeg", src, "--out", out], { timeout: 15000 });
-    if (r.status === 0 && existsSync(out)) return out;
-    // 尝试读取预期输出（png 同名 / jpg 换扩展名）
-    if (existsSync(thumbPath)) return thumbPath;
-    return src;
-  } catch {
-    return join(originDir, name);
-  }
-}
-
-/** 读取图片为 base64，优先缩略图（预览提速），返回原图相对路径供下载 */
-function readImageBase64(originDir: string, name: string, base: string): { name: string; base64: string; mime: string; path: string } {
+/**
+ * 读取图片为 base64，优先缩略图（预览提速），返回原图相对路径供下载。
+ * 缩略图由 lib/image-thumb 生成：sharp → ImageMagick → macOS sips → 原图（跨平台、异步）。
+ */
+async function readImageBase64(
+  originDir: string,
+  name: string,
+  base: string,
+): Promise<{ name: string; base64: string; mime: string; path: string }> {
   // 防穿越兜底：读取路径必须仍在 originDir 内
   const target = resolve(join(originDir, name));
   if (!target.startsWith(resolve(originDir) + sep)) throw new Error("非法文件名");
-  const src = ensureThumb(originDir, name);
+
+  const thumb = await ensureThumb(target, { maxPx: THUMB_MAX });
+  const src = thumb.path;
   const buf = readFileSync(src);
   const ext = (src.split(".").pop() || "jpeg").toLowerCase();
   const mime =
@@ -113,7 +100,7 @@ export async function GET(req: NextRequest) {
       );
       for (const name of imageFiles) {
         seenImages.add(name);
-        images.push(readImageBase64(d, name, base));
+        images.push(await readImageBase64(d, name, base));
       }
     }
 
@@ -175,7 +162,7 @@ export async function GET(req: NextRequest) {
           for (const name of candidates) {
             const p = join(inputDir, name);
             if (!existsSync(p)) continue;
-            const img = readImageBase64(inputDir, name, base);
+            const img = await readImageBase64(inputDir, name, base);
             inputImages.push({ key: label, name: img.name, base64: img.base64, mime: img.mime });
             break; // 每类只取一张
           }

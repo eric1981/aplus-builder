@@ -161,6 +161,27 @@ node scripts/reconcile-orders.mjs     # 订单↔流水↔余额 三方一致性
 node scripts/reconcile-credits.mjs    # 余额 vs 流水合计（--apply 补账）
 ```
 
+## 部署（华为云 ECS / Linux）
+
+完整手册见 [`deploy/README.md`](deploy/README.md)，本目录另含：
+`install-linux.sh`（系统依赖：Node 24 / Chrome / **中文字体** / ImageMagick / Python 依赖 / Nginx）、
+`aplus-builder.service`（systemd）、`nginx.conf.example`（反代 + HTTPS + 真实 IP 透传）、
+`backup.sh`（SQLite 一致性备份 + 模板 + 配置，保留 N 份）、`../.env.local.example`。
+
+选型结论（本项目**不需要 GPU**，生图走外部 API）：起步 `s7 4 vCPU 8 GiB`，
+推荐生产 `s7 8 vCPU 16 GiB` + 数据盘 ESSD 200 GB + EIP 按流量；**单实例假设**（内存队列 +
+SQLite）不能靠加机器横向扩容。
+
+Linux 迁移要点：
+- 预览缩略图已改为跨平台：**sharp（随 Next 安装）→ ImageMagick → macOS sips → 原图**，
+  不再依赖 macOS 专有的 `sips`；且无透明通道的 PNG 会转 JPEG（预览流量可降 10–40 倍）。
+  部署后自检：`node scripts/thumb-check.mjs <任一图片>`
+- 必须安装中文字体（`fonts-noto-cjk`），否则 Chrome 截图里的中文变成方块
+- hermes 的 `venv` 不可跨平台拷贝，需在 ECS 上用 `uv pip install -e ".[all,dev]"` 重装；
+  duma profile 保持 `~/.hermes/profiles/duma` 布局（技能内大量使用 `~/...` 路径）
+- 反代需透传 `X-Forwarded-Proto`（登录 Cookie 的 Secure 依赖它）与 `X-Forwarded-For`，
+  并把 `TRUSTED_PROXY_HOPS` 设为代理层数（限流才按真实客户端 IP 计数）
+
 ## 自测与 CI
 
 ```bash

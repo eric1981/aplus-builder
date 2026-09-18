@@ -16,6 +16,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // sharp 是原生模块（Next 的 optionalDependency）：交给 Node 直接 require，
+  // 不要打进 server bundle，否则跨平台部署时容易加载失败（缩略图会静默回退原图）。
+  serverExternalPackages: ["sharp"],
+
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
