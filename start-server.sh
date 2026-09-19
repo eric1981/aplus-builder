@@ -17,11 +17,43 @@ cd "$(dirname "$0")" || exit 1
 CUSTOMER="${1:-}"
 PORT="${PORT:-3000}"
 
+# 列出监听 ${PORT} 的进程（仅用于诊断输出）。
+# 跨平台：lsof（macOS 自带）→ ss（iproute2，Ubuntu 默认）→ fuser（psmisc）。
+# 三者都没有时不报错，只给一句提示 —— 原先直接调 lsof，在 Ubuntu 最小安装上会打出
+# "command not found" 让人误以为端口检测本身失败了。
+list_port_pids() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"${PORT}" | grep LISTEN && return 0
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp 2>/dev/null | grep -E "[:.]${PORT}[[:space:]]" && return 0
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -n tcp "${PORT}" 2>&1 && return 0
+  fi
+  echo "  （系统里没有 lsof/ss/fuser，无法列出占用进程；可用 ss/netstat 自行排查）"
+  return 0
+}
+
+# 通配绑定探测：python3 优先（install-linux.sh 必装），其次 node（本项目必然存在）。
+# 两者都没有时不做判断，直接交给 next start 报错。
+port_bindable() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import socket; s=socket.socket(); s.bind(('0.0.0.0', ${PORT})); s.close()" 2>/dev/null
+    return $?
+  fi
+  if command -v node >/dev/null 2>&1; then
+    node -e "const n=require('net');const s=n.createServer();s.on('error',()=>process.exit(1));s.listen(${PORT},'0.0.0.0',()=>s.close(()=>process.exit(0)));" 2>/dev/null
+    return $?
+  fi
+  return 0
+}
+
 # 端口检测：尝试绑定通配端口。仅当 *:$PORT 被真占用（如应用已运行）时才阻止；
 # WhatsApp bridge 占 127.0.0.1:$PORT 不影响应用绑定 *:$PORT，两者可共存。
-if ! python3 -c "import socket; s=socket.socket(); s.bind(('0.0.0.0', ${PORT})); s.close()" 2>/dev/null; then
+if ! port_bindable; then
   echo "端口 ${PORT} 的通配绑定被占用（可能应用已在运行）："
-  lsof -nP -iTCP:"${PORT}" | grep LISTEN
+  list_port_pids
   echo "请先停止旧实例再启动。"
   exit 1
 fi

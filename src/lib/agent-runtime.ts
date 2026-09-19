@@ -7,6 +7,8 @@
  * 但不应该依赖第三方过滤策略 —— 这里改为显式白名单，只放行运行必需项。
  * 注意：hermes 的模型/生图密钥来自它自己的 `~/.hermes/profiles/<p>/.env`，
  * 与本进程环境无关，因此收紧后不影响生成。
+ * PATH 例外：单独处理并注入平台标准 PATH 兜底（Linux/systemd 下父进程 PATH 可能为空），
+ * 否则子进程找不到 `python3` 等技能依赖。
  *
  * 二、提示注入数据边界（wrapUserData / DATA_BOUNDARY_RULE）
  * 用户填写的产品描述、客户要求、参考图提示词会原样进入 agent prompt。恶意内容
@@ -22,12 +24,15 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { getAgentHome } from "@/lib/config";
+import { defaultPath, ensureLocalBinInPath } from "@/lib/platform";
 
 // ===== 一、环境变量白名单 =====
 
-/** 允许透传给 agent 的非敏感变量（含 hermes 自身的运维开关，便于显式配置） */
+/**
+ * 允许透传给 agent 的非敏感变量（含 hermes 自身的运维开关，便于显式配置）。
+ * 注意 PATH 不在此列：它需要额外处理（见 agentEnv），避免出现"值存在但为空"的边界。
+ */
 const PASSTHROUGH_KEYS = [
-  "PATH",
   "LANG",
   "LC_ALL",
   "LC_CTYPE",
@@ -47,6 +52,10 @@ const PASSTHROUGH_KEYS = [
 /**
  * 构造 agent 子进程的最小环境变量。
  * HOME 固定为 AGENT_HOME（与改造前行为一致，避免影响技能里 `~` 的语义）。
+ *
+ * PATH 单独处理（跨平台稳定性）：父进程 PATH 为空时（systemd 直接拉起、环境被清空）
+ * 必须注入平台标准 PATH，否则技能里的 `python3` / `curl` / `ffmpeg` 全部找不到；
+ * 无论哪种情况都保证 agent 家目录的 `~/.local/bin` 在列（hermes 软链常放这里）。
  */
 export function agentEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   // NODE_ENV 仅为满足本项目的 ProcessEnv 类型要求而带上（非敏感，hermes 不依赖）
@@ -56,6 +65,9 @@ export function agentEnv(extra: Record<string, string | undefined> = {}): NodeJS
     if (v !== undefined && v !== "") env[key] = v;
   }
   env.HOME = getAgentHome();
+  const inheritedPath =
+    process.env.PATH && process.env.PATH.trim() ? process.env.PATH : defaultPath();
+  env.PATH = ensureLocalBinInPath(inheritedPath, env.HOME);
   for (const [k, v] of Object.entries(extra)) {
     if (v === undefined || v === "") delete env[k];
     else env[k] = v;

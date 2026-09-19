@@ -9,16 +9,20 @@
  *   1. **sharp**（Next 的 optionalDependency，通常已随 npm install 装好；
  *      macOS / Linux x64 / arm64 均有预编译包，异步、无子进程）
  *   2. ImageMagick：`magick` 或 `convert`（Linux 上 `apt install imagemagick`）
- *   3. macOS 的 `sips`（保留，兼容本地开发）
+ *   3. macOS 的 `sips`（仅 macOS 探测）
  *   4. 回退：返回原图路径（绝不阻断预览）
  *
  * 另外做两件省资源的事：
  *   - 原图已经很小的（<200KB）不重复生成缩略图；
  *   - 并发上限（默认 2），避免多张 4K 图同时解码把内存打满。
+ *
+ * 外部命令探测走 `platform.findInPath`（扫 PATH，不依赖 `which`）并缓存绝对路径：
+ * Ubuntu 最小安装不保证有 `which`，且用绝对路径调用可避免 PATH 被精简时静默降级。
  */
 import { existsSync, mkdirSync, statSync } from "fs";
 import { spawnSync } from "child_process";
 import { join, extname } from "path";
+import { findInPath, IS_MAC } from "./platform";
 
 export const THUMB_DIR_NAME = "thumbs";
 const DEFAULT_MAX_PX = 800;
@@ -81,13 +85,19 @@ function existingThumb(srcPath: string): string | null {
   return null;
 }
 
-/** 探测可执行文件是否存在（用 which，避免 shell:true） */
-function hasBinary(bin: string): boolean {
-  try {
-    return spawnSync("which", [bin], { stdio: "ignore" }).status === 0;
-  } catch {
-    return false;
-  }
+/**
+ * 解析可执行文件为绝对路径（不依赖 `which`，也不 spawn 子进程）。
+ * Ubuntu 最小安装不保证有 `which`（debianutils 非必需包），原先的 `which` 探测会全部
+ * 返回 false，导致缩略图静默回退原图。
+ * 缓存规则：命中即缓存绝对路径（工具不会中途搬家），未命中不缓存（装完即可用）。
+ */
+const toolCache = new Map<string, string>();
+function toolPath(bin: string): string | null {
+  const cached = toolCache.get(bin);
+  if (cached) return cached;
+  const found = findInPath(bin);
+  if (found) toolCache.set(bin, found);
+  return found;
 }
 
 interface SharpApi {
@@ -136,9 +146,9 @@ function runTool(bin: string, args: string[]): boolean {
 export async function thumbnailToolchain(): Promise<string[]> {
   const tools: string[] = [];
   if (await loadSharp()) tools.push("sharp");
-  if (hasBinary("magick")) tools.push("magick");
-  if (hasBinary("convert")) tools.push("convert");
-  if (hasBinary("sips")) tools.push("sips");
+  if (toolPath("magick")) tools.push("magick");
+  if (toolPath("convert")) tools.push("convert");
+  if (IS_MAC && toolPath("sips")) tools.push("sips");
   return tools;
 }
 
@@ -189,18 +199,22 @@ export async function ensureThumb(srcPath: string, opts: ThumbOptions = {}): Pro
       }
 
       // 2) ImageMagick（magick 新命令 / convert 老命令）
+      //    用绝对路径调用：不依赖 PATH 解析，也不受 systemd 精简环境影响。
       const imArgs = [`-resize`, `${maxPx}x${maxPx}>`, `-quality`, String(quality), srcPath, out];
-      if (hasBinary("magick") && runTool("magick", imArgs) && existsSync(out)) {
+      const magick = toolPath("magick");
+      if (magick && runTool(magick, imArgs) && existsSync(out)) {
         return { path: out, generated: true, via: "magick" };
       }
-      if (hasBinary("convert") && runTool("convert", imArgs) && existsSync(out)) {
+      const convert = toolPath("convert");
+      if (convert && runTool(convert, imArgs) && existsSync(out)) {
         return { path: out, generated: true, via: "convert" };
       }
 
-      // 3) macOS sips（保留本地开发兼容）
-      if (hasBinary("sips")) {
+      // 3) macOS sips（仅 macOS 存在；保留本地开发兼容，Linux 上跳过）
+      const sips = IS_MAC ? toolPath("sips") : null;
+      if (sips) {
         const sipsArgs = ["-Z", String(maxPx), "-s", "format", ext === "png" ? "png" : "jpeg", srcPath, "--out", out];
-        if (runTool("sips", sipsArgs) && existsSync(out)) {
+        if (runTool(sips, sipsArgs) && existsSync(out)) {
           return { path: out, generated: true, via: "sips" };
         }
       }

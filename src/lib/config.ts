@@ -11,10 +11,16 @@
  */
 import { join, resolve } from "path";
 import { homedir } from "os";
+import { defaultChromePath, defaultOutputBase } from "./platform";
 
-export const AGENT_HOME = process.env.AGENT_HOME || homedir() || "/Users/eric";
+export const AGENT_HOME = process.env.AGENT_HOME || homedir() || process.cwd();
 
-const DEFAULT_OUTPUT_BASE = resolve(join(AGENT_HOME, "Downloads", "aplus-builder"));
+/**
+ * 产出根目录默认值（未显式设 OUTPUT_BASE 时使用）。
+ * 平台相关：macOS 仍是 ~/Downloads/aplus-builder（与改造前一致）；
+ * Linux 优先数据盘 /data/aplus-builder。详见 lib/platform.ts。
+ */
+const DEFAULT_OUTPUT_BASE = resolve(defaultOutputBase(AGENT_HOME));
 
 export const OUTPUT_BASE = resolve(
   process.env.OUTPUT_BASE || DEFAULT_OUTPUT_BASE,
@@ -42,13 +48,13 @@ export function getAgentHome(): string {
   return dynValue("agentHome") || process.env.AGENT_HOME || AGENT_HOME;
 }
 
-/** Chrome 可执行文件路径 */
+/**
+ * Chrome 可执行文件路径。
+ * 显式配置（后台设置 / CHROME_PATH）优先；未配置时按平台自动探测
+ * （macOS 优先 /Applications/Google Chrome.app/...，Linux 走 /usr/bin 等候选）。
+ */
 export function getChromePath(): string {
-  return (
-    dynValue("chromePath") ||
-    process.env.CHROME_PATH ||
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  );
+  return dynValue("chromePath") || process.env.CHROME_PATH || defaultChromePath();
 }
 
 /** 生图 Agent 总超时（ms） */

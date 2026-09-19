@@ -8,14 +8,38 @@
  *
  * 说明：应用侧 `lib/image-thumb.ts` 的优先级是
  *   sharp（随 Next 安装，跨平台，无需系统包）→ ImageMagick(magick/convert) → macOS sips → 回退原图。
- * 本脚本用同样的探测方式，便于在 ECS 上快速确认；不依赖 TS 运行时。
+ * 本脚本用同样的探测方式（扫 PATH，不依赖 `which`），便于在 ECS 上快速确认；不依赖 TS 运行时。
  */
-import { spawnSync } from "node:child_process";
 import { existsSync, statSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, extname } from "node:path";
+import { join, extname, delimiter } from "node:path";
 
-const has = (bin) => spawnSync("which", [bin], { stdio: "ignore" }).status === 0;
+/**
+ * 命令探测不依赖 `which`（Ubuntu 最小安装不保证有 debianutils），
+ * 直接扫 PATH —— 与 src/lib/platform.ts 的 findInPath 保持同一逻辑。
+ */
+const defaultPath = () =>
+  (process.platform === "darwin"
+    ? ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    : ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"]
+  )
+    .concat([join(process.env.HOME || "", ".local", "bin")])
+    .filter(Boolean)
+    .join(delimiter);
+
+const findInPath = (bin) => {
+  const raw = process.env.PATH && process.env.PATH.trim() ? process.env.PATH : defaultPath();
+  for (const dir of raw.split(delimiter)) {
+    if (!dir) continue;
+    const p = join(dir, bin);
+    try {
+      if (existsSync(p) && (statSync(p).mode & 0o111) !== 0) return p;
+    } catch {}
+  }
+  return null;
+};
+
+const has = (bin) => Boolean(findInPath(bin));
 
 console.log("=== 缩略图工具链自检 ===");
 
@@ -26,7 +50,8 @@ try {
 } catch {}
 console.log("  sharp   :", sharp ? "可用 ✓（首选：异步、跨平台、无需系统包）" : "不可用 ✗（检查 npm ci 是否完整）");
 for (const t of ["magick", "convert", "sips"]) {
-  console.log(`  ${t.padEnd(7)}:`, has(t) ? "可用" : "无");
+  const p = findInPath(t);
+  console.log(`  ${t.padEnd(7)}:`, p ? `可用 (${p})` : "无");
 }
 if (!sharp && !has("magick") && !has("convert") && !has("sips")) {
   console.log("  ⚠ 无任何缩略图工具：预览会回退原图（Linux 上请 `apt install imagemagick` 或确认 sharp 已装）");
